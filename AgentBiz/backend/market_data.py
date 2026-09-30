@@ -113,9 +113,15 @@ def get_ohlc(symbol: str, period: str = "1y", interval: str = "1d") -> pd.DataFr
             if not cached.empty:
                 return cached
             raise
-    df = _fetch_ccxt(native, interval, perp=(source == "ccxt-perp"))
-    _cache_store(df, symbol, interval)
-    return df
+    try:
+        df = _fetch_ccxt(native, interval, perp=(source == "ccxt-perp"))
+        _cache_store(df, symbol, interval)
+        return df
+    except Exception:
+        cached = _cache_load(symbol, interval)
+        if not cached.empty:
+            return cached
+        raise
 
 
 def get_price(symbol: str) -> float:

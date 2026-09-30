@@ -25,12 +25,24 @@ def run_backtest(df: pd.DataFrame, signals: pd.Series, cost_rate: float) -> dict
     peak = equity.cummax()
     dd = float(((equity - peak) / peak).min()) if n else 0.0
     trades = int((turnover > 0).sum())
-    leg_ret = net[pos != 0]
-    wins = int((leg_ret > 0).sum())
-    total_active = int(len(leg_ret))
-    win_rate = wins / total_active if total_active else 0.0
-    gross_win = float(leg_ret[leg_ret > 0].sum()) if total_active else 0.0
-    gross_loss = float(-leg_ret[leg_ret < 0].sum()) if total_active else 0.0
+    # win_rate/profit_factor por viaje completo (entrada->salida), igual que paper_portfolio
+    legs = []
+    acc = 0.0
+    prev = 0
+    for i in range(n):
+        p = int(pos.iloc[i]) if pos.iloc[i] == pos.iloc[i] else 0
+        if p != prev and (p == 0 or prev != 0):
+            legs.append(acc)
+            acc = 0.0
+        if p != 0:
+            acc += float(net.iloc[i])
+        prev = p
+    if prev != 0:
+        legs.append(acc)
+    wins = sum(1 for x in legs if x > 0)
+    win_rate = wins / len(legs) if legs else 0.0
+    gross_win = sum(x for x in legs if x > 0)
+    gross_loss = sum(-x for x in legs if x < 0)
     if gross_loss > 1e-12:
         profit_factor = gross_win / gross_loss
     elif gross_win > 0:

@@ -64,3 +64,13 @@ def test_rank_universe_smoke():
     rows = bt.rank_universe(phase="aggressive")
     assert len(rows) > 30
     assert all("sharpe" in r and "eligible" in r for r in rows[:10])
+
+
+def test_win_rate_per_round_trip():
+    closes = np.array([100.0, 100.0, 99.0, 101.0, 101.0])
+    df = _df(closes)
+    sig = pd.Series([0, 1, 1, 1, 0], index=df.index)
+    m = bt.run_backtest(df, sig, 0.0)
+    # un viaje completo ganador (con dia rojo dentro) = 100% win rate, no 1/3
+    assert m["win_rate"] == 1.0
+    assert m["n_trades"] == 2

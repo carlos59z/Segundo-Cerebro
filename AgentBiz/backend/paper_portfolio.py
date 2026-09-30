@@ -28,7 +28,11 @@ class Portfolio:
         c.execute("""CREATE TABLE IF NOT EXISTS positions(
             id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, side TEXT,
             qty_usd REAL, leverage REAL, entry REAL, stop_loss REAL, take_profit REAL,
-            strategy TEXT, opened_at TEXT, status TEXT DEFAULT 'open')""")
+            strategy TEXT, opened_at TEXT, status TEXT DEFAULT 'open', unrealized REAL DEFAULT 0)""")
+        try:
+            c.execute("ALTER TABLE positions ADD COLUMN unrealized REAL DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
         c.execute("""CREATE TABLE IF NOT EXISTS trades(
             id INTEGER PRIMARY KEY AUTOINCREMENT, position_id INTEGER, symbol TEXT,
             side TEXT, entry REAL, exit REAL, pnl REAL, reason TEXT, strategy TEXT,
@@ -40,37 +44,67 @@ class Portfolio:
         if row is None:
             c.execute("INSERT INTO meta VALUES('capital', ?)", (capital,))
             c.execute("INSERT INTO meta VALUES('daily_pnl', 0.0)")
+            c.execute("INSERT INTO meta VALUES('phase', ?)", (self.phase,))
+            c.execute("INSERT INTO meta VALUES('daily_date', ?)",
+                      (datetime.date.today().isoformat(),))
         c.commit()
         c.close()
+        stored = self._meta_raw("phase")
+        if stored:
+            self.phase = stored
 
-    def _meta(self, key):
+    def _meta_raw(self, key):
         c = self._conn()
         try:
             row = c.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
-            return float(row[0]) if row else 0.0
+            return row[0] if row else None
         finally:
             c.close()
 
+    def _meta(self, key):
+        v = self._meta_raw(key)
+        if v is None:
+            return 0.0
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return 0.0
+
     def _set_meta(self, key, value):
         c = self._conn()
-        c.execute("INSERT OR REPLACE INTO meta VALUES(?,?)", (key, float(value)))
+        c.execute("INSERT OR REPLACE INTO meta VALUES(?,?)", (key, value))
         c.commit()
         c.close()
 
     def _force_daily_pnl(self, v):
         self._set_meta("daily_pnl", v)
 
+    def _rollover_day(self):
+        today = datetime.date.today().isoformat()
+        if self._meta_raw("daily_date") == today:
+            return
+        c = self._conn()
+        try:
+            c.execute("INSERT OR REPLACE INTO meta VALUES('daily_date', ?)", (today,))
+            c.execute("INSERT OR REPLACE INTO meta VALUES('daily_pnl', 0.0)")
+            c.commit()
+        finally:
+            c.close()
+
     def get_status(self):
+        self._rollover_day()
         c = self._conn()
         try:
             open_n = c.execute("SELECT COUNT(*) FROM positions WHERE status='open'").fetchone()[0]
+            unrealized = c.execute(
+                "SELECT COALESCE(SUM(unrealized),0) FROM positions WHERE status='open'").fetchone()[0]
             pnls = [t[0] for t in c.execute("SELECT pnl FROM trades").fetchall()]
         finally:
             c.close()
         wins = sum(1 for p in pnls if p > 0)
         capital = self._meta("capital")
         realized = sum(pnls)
-        equity = capital + realized
+        equity = capital + realized + unrealized
         peak = self._meta("peak_equity")
         if equity > peak:
             self._set_meta("peak_equity", equity)
@@ -80,7 +114,8 @@ class Portfolio:
         rules = PHASES[self.phase]
         return {
             "capital": round(capital, 2), "equity": round(equity, 2),
-            "cash": round(equity, 2), "open_positions": open_n,
+            "cash": round(capital + realized, 2), "unrealized": round(unrealized, 2),
+            "open_positions": open_n,
             "daily_pnl": round(daily_pnl, 2),
             "drawdown": round(drawdown, 6), "phase": self.phase,
             "trades": len(pnls),
@@ -124,13 +159,15 @@ class Portfolio:
     def close_position(self, position_id, price, reason):
         c = self._conn()
         try:
-            row = c.execute("SELECT * FROM positions WHERE id=? AND status='open'", (position_id,)).fetchone()
+            row = c.execute(
+                "SELECT symbol,side,qty_usd,leverage,entry,stop_loss,take_profit,strategy "
+                "FROM positions WHERE id=? AND status='open'", (position_id,)).fetchone()
             if not row:
                 raise RiskError(f"posicion {position_id} no abierta")
-            _, symbol, side, qty_usd, leverage, entry, sl, tp, strat, _, _ = row
+            symbol, side, qty_usd, leverage, entry, sl, tp, strat = row
             sign = 1 if side == "long" else -1
             pnl = sign * (price - entry) / entry * qty_usd * leverage
-            c.execute("UPDATE positions SET status='closed' WHERE id=?", (position_id,))
+            c.execute("UPDATE positions SET status='closed', unrealized=0 WHERE id=?", (position_id,))
             c.execute(
                 "INSERT INTO trades(position_id,symbol,side,entry,exit,pnl,reason,strategy,closed_at,qty_usd,leverage) "
                 "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
@@ -143,48 +180,72 @@ class Portfolio:
         return {"pnl": round(pnl, 2), "reason": reason, "symbol": symbol}
 
     def mark_to_market(self, prices, bars=None):
-        """Cierra posiciones cuyo SL/TP toca la barra (low<=SL o high>=TP)."""
+        """Marca unrealized con precios dados y cierra posiciones cuyo SL/TP toca la barra."""
         closed = []
         bars = bars or {}
         c = self._conn()
         try:
             rows = c.execute(
-                "SELECT id,symbol,side,entry,stop_loss,take_profit FROM positions WHERE status='open'"
+                "SELECT id,symbol,side,entry,qty_usd,leverage,stop_loss,take_profit "
+                "FROM positions WHERE status='open'"
             ).fetchall()
         finally:
             c.close()
-        for pid, symbol, side, entry, sl, tp in rows:
+        remaining = []
+        for pid, symbol, side, entry, qty_usd, leverage, sl, tp in rows:
             low, high = bars.get(symbol, (None, None))
             if low is None:
                 px = prices.get(symbol)
                 if px is None:
+                    remaining.append((pid, symbol, side, entry, qty_usd, leverage, None))
                     continue
                 if side == "long":
                     if px <= sl:
                         closed.append(self.close_position(pid, sl, "sl"))
+                        continue
                     elif px >= tp:
                         closed.append(self.close_position(pid, tp, "tp"))
+                        continue
                 else:
                     if px >= sl:
                         closed.append(self.close_position(pid, sl, "sl"))
+                        continue
                     elif px <= tp:
                         closed.append(self.close_position(pid, tp, "tp"))
+                        continue
+                remaining.append((pid, symbol, side, entry, qty_usd, leverage, px))
                 continue
             if side == "long":
                 if low <= sl:
                     closed.append(self.close_position(pid, sl, "sl"))
+                    continue
                 elif high >= tp:
                     closed.append(self.close_position(pid, tp, "tp"))
+                    continue
             else:
                 if high >= sl:
                     closed.append(self.close_position(pid, sl, "sl"))
+                    continue
                 elif low <= tp:
                     closed.append(self.close_position(pid, tp, "tp"))
+                    continue
+            remaining.append((pid, symbol, side, entry, qty_usd, leverage, (low + high) / 2))
+        c = self._conn()
+        try:
+            for pid, symbol, side, entry, qty_usd, leverage, mark in remaining:
+                if mark is None:
+                    continue
+                sign = 1 if side == "long" else -1
+                unrealized = sign * (mark - entry) / entry * qty_usd * leverage
+                c.execute("UPDATE positions SET unrealized=? WHERE id=?", (unrealized, pid))
+            c.commit()
+        finally:
+            c.close()
         return closed
 
     def set_phase(self, phase):
         if phase not in PHASES:
             raise RiskError(f"fase desconocida: {phase}")
         self.phase = phase
-        self._set_meta("daily_pnl", 0.0)
+        self._set_meta("phase", phase)
         return self.get_status()

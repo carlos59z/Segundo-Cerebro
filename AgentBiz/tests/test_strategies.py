@@ -40,3 +40,19 @@ def test_no_lookahead_sma():
     sig2 = st.STRATEGIES["sma_cross"](df2)
     # la decision en t usa solo datos hasta t-1: el cierre de hoy no cambia la senal de hoy
     assert sig2.iloc[-1] == 0
+
+
+@pytest.mark.parametrize("name", sorted(st.STRATEGIES))
+def test_no_lookahead_all_strategies(name):
+    n = 120
+    df = pd.DataFrame({
+        "open": np.full(n, 100.0), "high": np.full(n, 101.0),
+        "low": np.full(n, 99.0), "close": np.full(n, 100.0),
+        "volume": np.full(n, 1000.0),
+    }, index=pd.date_range("2025-01-01", periods=n, freq="D", tz="UTC"))
+    sig1 = st.STRATEGIES[name](df)
+    df2 = df.copy()
+    df2.iloc[-3:, df2.columns.get_loc("close")] = 300.0
+    sig2 = st.STRATEGIES[name](df2)
+    # la decision en t-3 usa solo datos hasta t-4: perturbar los ultimos 3 cierres no la cambia
+    assert sig2.iloc[-3] == sig1.iloc[-3], name
