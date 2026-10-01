@@ -80,3 +80,10 @@ def test_ccxt_fallback_returns_cached_when_fetch_fails(monkeypatch, tmp_path):
     monkeypatch.setattr(md, "_fetch_ccxt", boom)
     out = md.get_ohlc("BTC")
     assert len(out) == 2
+
+
+def test_cache_wal_enabled():
+    conn = md._cache_conn()
+    mode = str(conn.execute("PRAGMA journal_mode").fetchone()[0]).lower()
+    conn.close()
+    assert mode == "wal"

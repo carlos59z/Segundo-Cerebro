@@ -42,7 +42,9 @@ def resolve(symbol: str):
 
 
 def _cache_conn():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
     conn.execute("CREATE TABLE IF NOT EXISTS ohlc (symbol TEXT, interval TEXT, ts TEXT, open REAL, high REAL, low REAL, close REAL, volume REAL, PRIMARY KEY(symbol, interval, ts))")
     conn.execute("CREATE TABLE IF NOT EXISTS price_cache (symbol TEXT PRIMARY KEY, price REAL, ts TEXT)")
     return conn

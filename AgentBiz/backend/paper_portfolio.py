@@ -21,7 +21,10 @@ class Portfolio:
         self._init_db(capital)
 
     def _conn(self):
-        return sqlite3.connect(self.db)
+        c = sqlite3.connect(self.db, timeout=30)
+        c.execute("PRAGMA journal_mode=WAL")
+        c.execute("PRAGMA busy_timeout=30000")
+        return c
 
     def _init_db(self, capital):
         c = self._conn()
@@ -122,6 +125,52 @@ class Portfolio:
             "win_rate": round(wins / len(pnls), 4) if pnls else 0.0,
             "daily_stop_hit": daily_pnl <= rules["daily_loss_stop"] * capital,
         }
+
+    def get_positions(self, status="open"):
+        c = self._conn()
+        try:
+            rows = c.execute(
+                "SELECT id,symbol,side,qty_usd,leverage,entry,stop_loss,take_profit,"
+                "strategy,opened_at,unrealized FROM positions WHERE status=? ORDER BY id DESC",
+                (status,)).fetchall()
+        finally:
+            c.close()
+        cols = ["id", "symbol", "side", "qty_usd", "leverage", "entry", "stop_loss",
+                "take_profit", "strategy", "opened_at", "unrealized"]
+        return [dict(zip(cols, r)) for r in rows]
+
+    def get_trades(self, limit=50):
+        c = self._conn()
+        try:
+            rows = c.execute(
+                "SELECT id,position_id,symbol,side,entry,exit,pnl,reason,strategy,closed_at "
+                "FROM trades ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        finally:
+            c.close()
+        cols = ["id", "position_id", "symbol", "side", "entry", "exit", "pnl",
+                "reason", "strategy", "closed_at"]
+        return [dict(zip(cols, r)) for r in rows]
+
+    def record_equity(self):
+        st = self.get_status()
+        c = self._conn()
+        try:
+            c.execute("INSERT INTO equity_curve VALUES(?,?)",
+                      (datetime.datetime.now(datetime.timezone.utc).isoformat(), st["equity"]))
+            c.commit()
+        finally:
+            c.close()
+        return st["equity"]
+
+    def get_equity_curve(self, limit=1000):
+        c = self._conn()
+        try:
+            rows = c.execute(
+                "SELECT ts, equity FROM equity_curve ORDER BY rowid DESC LIMIT ?",
+                (limit,)).fetchall()
+        finally:
+            c.close()
+        return [{"ts": r[0], "equity": r[1]} for r in reversed(rows)]
 
     def can_open(self, risk_pct):
         rules = PHASES[self.phase]

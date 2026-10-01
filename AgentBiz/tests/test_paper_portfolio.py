@@ -132,3 +132,33 @@ def test_leverage_cap_reachable_in_range_risk(pf):
 def test_margin_exceeds_equity_reachable(pf):
     with pytest.raises(pp.RiskError, match="margen"):
         pf.open_position("X", "long", 3000.0, 1.0, 100.0, 95.0, 110.0, "s")
+
+
+def test_wal_enabled(pf):
+    c = pf._conn()
+    mode = str(c.execute("PRAGMA journal_mode").fetchone()[0]).lower()
+    c.close()
+    assert mode == "wal"
+
+
+def test_get_positions_and_trades(pf):
+    _open(pf)
+    pos = pf.get_positions()
+    assert len(pos) == 1 and pos[0]["symbol"] == "BTC"
+    assert pos[0]["unrealized"] == 0.0
+    pf.mark_to_market({"BTC": 115.0})  # tp=110 -> cierra
+    assert pf.get_positions() == []
+    tr = pf.get_trades()
+    assert len(tr) == 1 and tr[0]["pnl"] > 0
+    assert tr[0]["symbol"] == "BTC" and tr[0]["reason"] == "tp"
+
+
+def test_record_equity_and_curve(pf):
+    assert pf.record_equity() == pytest.approx(2500.0)
+    _open(pf)
+    pf.mark_to_market({"BTC": 105.0})
+    pf.record_equity()
+    curve = pf.get_equity_curve()
+    assert len(curve) == 2
+    assert curve[0]["equity"] == pytest.approx(2500.0)
+    assert curve[-1]["equity"] == pytest.approx(2530.0)
