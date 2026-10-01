@@ -188,3 +188,59 @@ def test_phase_change_preserves_open_positions(client):
     assert len(after["positions"]) == 1
     assert after["positions"][0]["id"] == before["positions"][0]["id"]
     assert after["positions"][0]["entry"] == before["positions"][0]["entry"]
+
+
+def test_mark_updates_unrealized_and_curve(client, monkeypatch):
+    import api.fund as fmod
+    r0 = client.post("/api/fund/orders", json=_open_order())
+    assert r0.status_code == 200
+    before = client.get("/api/fund/performance").json()
+    monkeypatch.setattr(fmod, "get_price", lambda sym: 105.0)
+    r = client.post("/api/fund/mark")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["marked"] == 1 and d["open"] == 1 and d["closed"] == []
+    pf = client.get("/api/fund/portfolio").json()
+    assert abs(pf["positions"][0]["unrealized"] - 30.0) < 0.01
+    after = client.get("/api/fund/performance").json()
+    assert len(after["curve"]) == len(before["curve"]) + 1
+    assert after["equity"] == 2530.0
+
+
+def test_mark_closes_position_at_sl(client, monkeypatch):
+    import api.fund as fmod
+    client.post("/api/fund/orders", json=_open_order())  # entry 100, sl 95, tp 110
+    monkeypatch.setattr(fmod, "get_price", lambda sym: 90.0)
+    r = client.post("/api/fund/mark")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["open"] == 0 and len(d["closed"]) == 1
+    pf = client.get("/api/fund/portfolio").json()
+    assert pf["status"]["open_positions"] == 0
+    tr = pf["trades"][0]
+    assert tr["reason"] == "sl" and tr["exit"] == 95.0
+
+
+def test_mark_without_positions_records_curve(client):
+    before = client.get("/api/fund/performance").json()
+    r = client.post("/api/fund/mark")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["marked"] == 0 and d["closed"] == []
+    after = client.get("/api/fund/performance").json()
+    assert len(after["curve"]) == len(before["curve"]) + 1
+
+
+def test_mark_tolerates_price_failure(client, monkeypatch):
+    import api.fund as fmod
+    client.post("/api/fund/orders", json=_open_order())
+
+    def boom(sym):
+        raise RuntimeError("sin red")
+
+    monkeypatch.setattr(fmod, "get_price", boom)
+    r = client.post("/api/fund/mark")
+    assert r.status_code == 200
+    assert r.json()["marked"] == 0
+    pf = client.get("/api/fund/portfolio").json()
+    assert pf["status"]["open_positions"] == 1

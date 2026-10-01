@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from paper_portfolio import Portfolio, PHASES, RiskError
 from agents.ai_brain import risk_review
 from backtester import rank_universe
+from market_data import get_price
 import research
 
 router = APIRouter(prefix="/api/fund", tags=["fund"])
@@ -138,6 +139,27 @@ async def fund_orders(req: OrderRequest):
     except Exception:
         pass
     return {"trade": trade, "risk_review": None}
+
+
+@router.post("/mark")
+async def fund_mark():
+    def work():
+        p = _pf()
+        if not p.get_equity_curve():
+            p.record_equity()  # linea base: capital inicial antes del 1er marcado
+        positions = p.get_positions("open")
+        prices = {}
+        for pos in positions:
+            try:
+                prices[pos["symbol"]] = get_price(pos["symbol"])
+            except Exception:
+                continue
+        closed = p.mark_to_market(prices)
+        p.record_equity()
+        st = p.get_status()
+        return {"marked": len(prices), "open": st["open_positions"],
+                "closed": closed, "status": st}
+    return await asyncio.to_thread(work)
 
 
 class BacktestRequest(BaseModel):
