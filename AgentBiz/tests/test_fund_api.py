@@ -89,3 +89,62 @@ def test_order_close_and_double_close_409(client):
     again = client.post("/api/fund/orders", json={"action": "close", "position_id": pid,
                                                    "price": 105.0})
     assert again.status_code == 409
+
+
+def test_backtest_endpoint_stores_and_strategies_serves(client, monkeypatch):
+    import api.fund as fmod
+    canned = [{"symbol": "SPY", "market": "etf", "strategy": "v1",
+               "total_return": 0.2, "annualized": 0.2, "sharpe": 1.5,
+               "max_drawdown": -0.1, "win_rate": 0.5, "profit_factor": 1.2,
+               "n_trades": 3, "eligible": True},
+              {"symbol": "BTC", "market": "crypto", "strategy": "v1",
+               "total_return": 0.1, "annualized": 0.1, "sharpe": 0.5,
+               "max_drawdown": -0.2, "win_rate": 0.4, "profit_factor": 1.0,
+               "n_trades": 2, "eligible": True}]
+    monkeypatch.setattr(fmod, "rank_universe",
+                        lambda phase="aggressive", period="1y": canned)
+    r = client.post("/api/fund/backtest", json={"phase": "aggressive"})
+    assert r.status_code == 200
+    assert r.json()["count"] == 2 and len(r.json()["top"]) == 2
+
+    st = client.get("/api/fund/strategies").json()
+    assert st["standard"] is None
+    assert {row["symbol"] for row in st["ranking"]} == {"SPY", "BTC"}
+    assert st["ranking"][0]["symbol"] == "BTC"  # mas reciente primero (id DESC)
+    assert isinstance(st["history"], list)
+
+
+def test_research_endpoint_ok_and_422(client, monkeypatch):
+    import research
+    calls = []
+
+    def fake_run(**kw):
+        calls.append(kw)
+        return {"status": "ok", "tested": 1, "runs": 0, "standard": None}
+
+    monkeypatch.setattr(research, "run_research", fake_run)
+    r = client.post("/api/fund/research", json={})
+    assert r.status_code == 200 and r.json()["status"] == "ok"
+    assert calls and calls[0]["db_path"].endswith("fund.db")
+
+    def fake_bad(**kw):
+        raise ValueError("ninguna SPEC valida en la respuesta")
+
+    monkeypatch.setattr(research, "run_research", fake_bad)
+    bad = client.post("/api/fund/research", json={})
+    assert bad.status_code == 422
+
+
+def test_research_endpoint_reads_vigente_phase(client, monkeypatch):
+    import research
+    client.post("/api/fund/phase", json={"phase": "moderate"})
+    seen = {}
+
+    def fake_run(db_path="fund.db", phase=None, period="1y"):
+        seen["phase"] = phase
+        return {"status": "sin_specs_nuevas", "tested": 0, "runs": 0, "standard": None}
+
+    monkeypatch.setattr(research, "run_research", fake_run)
+    r = client.post("/api/fund/research", json={})
+    assert r.status_code == 200
+    assert seen["phase"] is None  # el router deja que el ciclo lea la fase vigente

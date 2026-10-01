@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from paper_portfolio import Portfolio, PHASES, RiskError
 from agents.ai_brain import risk_review
+from backtester import rank_universe
 import research
 
 router = APIRouter(prefix="/api/fund", tags=["fund"])
@@ -131,3 +132,45 @@ async def fund_orders(req: OrderRequest):
     _log_order(f"Cerrar {req.symbol or trade['symbol']}",
                f"posicion {req.position_id} a {req.price} ({req.reason})")
     return {"trade": trade, "risk_review": None}
+
+
+class BacktestRequest(BaseModel):
+    phase: Optional[Literal["aggressive", "moderate"]] = None
+    period: str = "1y"
+
+
+class ResearchRequest(BaseModel):
+    phase: Optional[Literal["aggressive", "moderate"]] = None
+    period: str = "1y"
+
+
+@router.post("/backtest")
+async def fund_backtest(req: BacktestRequest):
+    pf = _pf()
+    await asyncio.to_thread(research.init_research_db, FUND_DB)
+    phase = req.phase if req.phase else await asyncio.to_thread(lambda: pf.phase)
+    rows = await asyncio.to_thread(
+        lambda: rank_universe(phase=phase, period=req.period))
+    await asyncio.to_thread(research.insert_strategy_results, FUND_DB, rows, phase)
+    return {"count": len(rows), "phase": phase, "top": rows[:20]}
+
+
+@router.get("/strategies")
+async def fund_strategies():
+    def work():
+        research.init_research_db(FUND_DB)
+        return {"standard": research.get_standard(FUND_DB),
+                "ranking": research.latest_results(FUND_DB, 50),
+                "history": research.research_history(FUND_DB, 20)}
+    return await asyncio.to_thread(work)
+
+
+@router.post("/research")
+async def fund_research(req: ResearchRequest):
+    try:
+        out = await asyncio.to_thread(
+            lambda: research.run_research(db_path=FUND_DB, phase=req.phase,
+                                          period=req.period))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return out
