@@ -4,6 +4,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from paper_portfolio import Portfolio, PHASES, RiskError
+from agents.ai_brain import risk_review
 import research
 
 router = APIRouter(prefix="/api/fund", tags=["fund"])
@@ -64,3 +65,69 @@ async def fund_performance():
                 "drawdown": round(dd, 6), "target": target,
                 "daily_pnl": st["daily_pnl"], "phase": st["phase"]}
     return await asyncio.to_thread(work)
+
+
+class OrderRequest(BaseModel):
+    action: Literal["open", "close"]
+    symbol: str = ""
+    side: Literal["long", "short"] = "long"
+    qty_usd: float = 0.0
+    leverage: float = 1.0
+    entry: float = 0.0
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+    strategy: str = "manual"
+    position_id: Optional[int] = None
+    price: Optional[float] = None
+    reason: str = "manual"
+    review: bool = False
+
+
+def _log_order(title, detail):
+    from memory.database import get_db
+    db = get_db()
+    db.execute("INSERT INTO tasks (agent_id, title, description, status, result) "
+               "VALUES ('trading', ?, ?, 'completed', ?)", (title, detail, detail))
+    db.commit()
+    db.close()
+
+
+@router.post("/orders")
+async def fund_orders(req: OrderRequest):
+    pf = _pf()
+    if req.action == "open":
+        if req.stop_loss is None or req.take_profit is None:
+            raise HTTPException(status_code=422, detail="SL/TP obligatorios")
+        if req.qty_usd <= 0 or req.entry <= 0:
+            raise HTTPException(status_code=422, detail="qty_usd y entry deben ser > 0")
+        review_result = None
+        if req.review:
+            review_result = await risk_review({
+                "symbol": req.symbol, "side": req.side, "qty_usd": req.qty_usd,
+                "leverage": req.leverage, "entry": req.entry,
+                "stop_loss": req.stop_loss, "take_profit": req.take_profit,
+                "strategy": req.strategy})
+            if review_result["decision"] == "rechaza":
+                raise HTTPException(status_code=403,
+                                    detail=f"Director de Riesgo rechaza: {review_result['reason']}")
+        try:
+            pos = await asyncio.to_thread(
+                pf.open_position, req.symbol, req.side, req.qty_usd, req.leverage,
+                req.entry, req.stop_loss, req.take_profit, req.strategy)
+        except RiskError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        await asyncio.to_thread(pf.record_equity)
+        _log_order(f"Abrir {req.side} {req.symbol}",
+                   f"{req.side} {req.symbol} qty={req.qty_usd} lev={req.leverage} "
+                   f"sl={req.stop_loss} tp={req.take_profit} [{req.strategy}]")
+        return {"position": pos, "risk_review": review_result}
+    if req.position_id is None or req.price is None:
+        raise HTTPException(status_code=422, detail="position_id y price requeridos para cerrar")
+    try:
+        trade = await asyncio.to_thread(pf.close_position, req.position_id, req.price, req.reason)
+    except RiskError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    await asyncio.to_thread(pf.record_equity)
+    _log_order(f"Cerrar {req.symbol or trade['symbol']}",
+               f"posicion {req.position_id} a {req.price} ({req.reason})")
+    return {"trade": trade, "risk_review": None}
