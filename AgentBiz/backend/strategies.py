@@ -6,9 +6,9 @@ def np_sign(s: pd.Series) -> pd.Series:
     return (s > 0).astype(int) - (s < 0).astype(int)
 
 
-def _sma_cross(df):
-    s20, s50 = df["close"].rolling(20).mean(), df["close"].rolling(50).mean()
-    raw = np_sign(s20 - s50)
+def _sma_cross(df, fast=20, slow=50):
+    s_fast, s_slow = df["close"].rolling(fast).mean(), df["close"].rolling(slow).mean()
+    raw = np_sign(s_fast - s_slow)
     return raw.shift(1).fillna(0).astype(int)
 
 
@@ -20,25 +20,25 @@ def _rsi(df, n=14):
     return 100 - 100 / (1 + rs)
 
 
-def _rsi_reversion(df):
-    r = _rsi(df)
+def _rsi_reversion(df, period=14, oversold=30, overbought=70):
+    r = _rsi(df, n=period)
     sig = pd.Series(0, index=df.index)
-    sig[r < 30] = 1
-    sig[r > 70] = -1
+    sig[r < oversold] = 1
+    sig[r > overbought] = -1
     return sig.shift(1).fillna(0).astype(int)
 
 
-def _momentum_30d(df):
-    mom = df["close"].pct_change(30)
+def _momentum_30d(df, window=30, threshold=0.05):
+    mom = df["close"].pct_change(window)
     sig = pd.Series(0, index=df.index)
-    sig[mom > 0.05] = 1
-    sig[mom < -0.05] = -1
+    sig[mom > threshold] = 1
+    sig[mom < -threshold] = -1
     return sig.shift(1).fillna(0).astype(int)
 
 
-def _donchian_breakout(df):
-    hi, lo = df["high"].rolling(20).max(), df["low"].rolling(20).min()
-    atr = (df["high"] - df["low"]).rolling(14).mean()
+def _donchian_breakout(df, channel=20, atr_period=14):
+    hi, lo = df["high"].rolling(channel).max(), df["low"].rolling(channel).min()
+    atr = (df["high"] - df["low"]).rolling(atr_period).mean()
     sig = pd.Series(0, index=df.index)
     sig[df["close"] > hi.shift(1)] = 1
     sig[df["close"] < lo.shift(1)] = -1
@@ -46,20 +46,21 @@ def _donchian_breakout(df):
     return sig.shift(1).fillna(0).astype(int)
 
 
-def _macd_trend(df):
-    e12, e26 = df["close"].ewm(span=12).mean(), df["close"].ewm(span=26).mean()
-    macd = e12 - e26
-    signal = macd.ewm(span=9).mean()
+def _macd_trend(df, fast=12, slow=26, signal_period=9):
+    e_fast = df["close"].ewm(span=fast).mean()
+    e_slow = df["close"].ewm(span=slow).mean()
+    macd = e_fast - e_slow
+    signal = macd.ewm(span=signal_period).mean()
     raw = np_sign(macd - signal)
     return raw.shift(1).fillna(0).astype(int)
 
 
-def _bollinger_reversion(df):
-    m, s = df["close"].rolling(20).mean(), df["close"].rolling(20).std()
+def _bollinger_reversion(df, window=20, devs=2.0):
+    m, s = df["close"].rolling(window).mean(), df["close"].rolling(window).std()
     z = (df["close"] - m) / s.replace(0, float("nan"))
     sig = pd.Series(0, index=df.index)
-    sig[z < -2] = 1
-    sig[z > 2] = -1
+    sig[z < -devs] = 1
+    sig[z > devs] = -1
     return sig.shift(1).fillna(0).astype(int)
 
 
@@ -71,3 +72,28 @@ STRATEGIES = {
     "macd_trend": _macd_trend,
     "bollinger_reversion": _bollinger_reversion,
 }
+
+STRATEGY_PARAMS = {
+    "sma_cross": {"fast": int, "slow": int},
+    "rsi_reversion": {"period": int, "oversold": int, "overbought": int},
+    "momentum_30d": {"window": int, "threshold": float},
+    "donchian_breakout": {"channel": int, "atr_period": int},
+    "macd_trend": {"fast": int, "slow": int, "signal_period": int},
+    "bollinger_reversion": {"window": int, "devs": float},
+}
+
+
+def validate_params(base, params):
+    if base not in STRATEGY_PARAMS:
+        raise ValueError(f"estrategia base desconocida: {base}")
+    unknown = set(params) - set(STRATEGY_PARAMS[base])
+    if unknown:
+        raise ValueError(f"parametros desconocidos para {base}: {sorted(unknown)}")
+    casted = {k: STRATEGY_PARAMS[base][k](v) for k, v in params.items()}
+    if base == "sma_cross" and casted.get("fast", 20) >= casted.get("slow", 50):
+        raise ValueError("sma_cross: fast debe ser menor que slow")
+    if base == "macd_trend" and casted.get("fast", 12) >= casted.get("slow", 26):
+        raise ValueError("macd_trend: fast debe ser menor que slow")
+    if base == "rsi_reversion" and casted.get("oversold", 30) >= casted.get("overbought", 70):
+        raise ValueError("rsi_reversion: oversold debe ser menor que overbought")
+    return casted
