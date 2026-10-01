@@ -22,9 +22,8 @@ class PhaseRequest(BaseModel):
 
 @router.get("/status")
 async def fund_status():
-    pf = _pf()
     await asyncio.to_thread(research.init_research_db, FUND_DB)
-    st = await asyncio.to_thread(pf.get_status)
+    st = await asyncio.to_thread(lambda: _pf().get_status())
     standard = await asyncio.to_thread(research.get_standard, FUND_DB)
     signals = await asyncio.to_thread(research.latest_results, FUND_DB, 5)
     return {"portfolio": st, "standard": standard, "signals": signals,
@@ -42,12 +41,11 @@ async def fund_portfolio():
 
 @router.post("/phase")
 async def fund_phase(req: PhaseRequest):
-    pf = _pf()
     try:
-        st = await asyncio.to_thread(lambda: pf.set_phase(req.phase))
+        st = await asyncio.to_thread(lambda: _pf().set_phase(req.phase))
     except RiskError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    await asyncio.to_thread(pf.record_equity)
+    await asyncio.to_thread(lambda: _pf().record_equity())
     return st
 
 
@@ -59,11 +57,10 @@ async def fund_performance():
         st = p.get_status()
         if not curve:
             curve = [{"ts": "now", "equity": st["equity"]}]
-        peak = max(pt["equity"] for pt in curve)
-        dd = (st["equity"] - peak) / peak if peak else 0.0
+        peak = research.get_meta(FUND_DB, "peak_equity", st["equity"]) or st["equity"]
         target = research.get_meta(FUND_DB, "target", st["capital"] * 2)
         return {"curve": curve, "equity": st["equity"], "peak": round(peak, 2),
-                "drawdown": round(dd, 6), "target": target,
+                "drawdown": st["drawdown"], "target": target,
                 "daily_pnl": st["daily_pnl"], "phase": st["phase"]}
     return await asyncio.to_thread(work)
 
@@ -95,7 +92,6 @@ def _log_order(title, detail):
 
 @router.post("/orders")
 async def fund_orders(req: OrderRequest):
-    pf = _pf()
     if req.action == "open":
         if req.stop_loss is None or req.take_profit is None:
             raise HTTPException(status_code=422, detail="SL/TP obligatorios")
@@ -113,24 +109,34 @@ async def fund_orders(req: OrderRequest):
                                     detail=f"Director de Riesgo rechaza: {review_result['reason']}")
         try:
             pos = await asyncio.to_thread(
-                pf.open_position, req.symbol, req.side, req.qty_usd, req.leverage,
-                req.entry, req.stop_loss, req.take_profit, req.strategy)
+                lambda: _pf().open_position(
+                    req.symbol, req.side, req.qty_usd, req.leverage,
+                    req.entry, req.stop_loss, req.take_profit, req.strategy))
         except RiskError as e:
             raise HTTPException(status_code=409, detail=str(e))
-        await asyncio.to_thread(pf.record_equity)
-        _log_order(f"Abrir {req.side} {req.symbol}",
-                   f"{req.side} {req.symbol} qty={req.qty_usd} lev={req.leverage} "
-                   f"sl={req.stop_loss} tp={req.take_profit} [{req.strategy}]")
+        await asyncio.to_thread(lambda: _pf().record_equity())
+        try:
+            await asyncio.to_thread(
+                _log_order, f"Abrir {req.side} {req.symbol}",
+                f"{req.side} {req.symbol} qty={req.qty_usd} lev={req.leverage} "
+                f"sl={req.stop_loss} tp={req.take_profit} [{req.strategy}]")
+        except Exception:
+            pass  # auditoria best-effort: no falla la orden
         return {"position": pos, "risk_review": review_result}
     if req.position_id is None or req.price is None:
         raise HTTPException(status_code=422, detail="position_id y price requeridos para cerrar")
     try:
-        trade = await asyncio.to_thread(pf.close_position, req.position_id, req.price, req.reason)
+        trade = await asyncio.to_thread(
+            lambda: _pf().close_position(req.position_id, req.price, req.reason))
     except RiskError as e:
         raise HTTPException(status_code=409, detail=str(e))
-    await asyncio.to_thread(pf.record_equity)
-    _log_order(f"Cerrar {req.symbol or trade['symbol']}",
-               f"posicion {req.position_id} a {req.price} ({req.reason})")
+    await asyncio.to_thread(lambda: _pf().record_equity())
+    try:
+        await asyncio.to_thread(
+            _log_order, f"Cerrar {req.symbol or trade['symbol']}",
+            f"posicion {req.position_id} a {req.price} ({req.reason})")
+    except Exception:
+        pass
     return {"trade": trade, "risk_review": None}
 
 
@@ -146,9 +152,8 @@ class ResearchRequest(BaseModel):
 
 @router.post("/backtest")
 async def fund_backtest(req: BacktestRequest):
-    pf = _pf()
     await asyncio.to_thread(research.init_research_db, FUND_DB)
-    phase = req.phase if req.phase else await asyncio.to_thread(lambda: pf.phase)
+    phase = req.phase if req.phase else await asyncio.to_thread(lambda: _pf().phase)
     rows = await asyncio.to_thread(
         lambda: rank_universe(phase=phase, period=req.period))
     await asyncio.to_thread(research.insert_strategy_results, FUND_DB, rows, phase)

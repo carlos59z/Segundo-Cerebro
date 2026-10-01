@@ -148,3 +148,43 @@ def test_research_endpoint_reads_vigente_phase(client, monkeypatch):
     r = client.post("/api/fund/research", json={})
     assert r.status_code == 200
     assert seen["phase"] is None  # el router deja que el ciclo lea la fase vigente
+
+
+def test_risk_review_fails_closed(monkeypatch):
+    import asyncio
+    import agents.ai_brain as ab
+
+    async def fake_error(prompt, **kw):
+        return "Error NVIDIA: 503"
+
+    monkeypatch.setattr(ab, "ask_nvidia", fake_error)
+    res = asyncio.run(ab.risk_review({"symbol": "BTC"}))
+    assert res["decision"] == "rechaza"
+
+    async def fake_aprueba(prompt, **kw):
+        return "APRUEBA: sena fuerte"
+
+    monkeypatch.setattr(ab, "ask_nvidia", fake_aprueba)
+    res2 = asyncio.run(ab.risk_review({"symbol": "BTC"}))
+    assert res2["decision"] == "aprueba"
+
+    async def fake_rechaza(prompt, **kw):
+        return "RECHAZA: sena debil"
+
+    monkeypatch.setattr(ab, "ask_nvidia", fake_rechaza)
+    res3 = asyncio.run(ab.risk_review({"symbol": "BTC"}))
+    assert res3["decision"] == "rechaza"
+
+
+def test_phase_change_preserves_open_positions(client):
+    r0 = client.post("/api/fund/orders", json=_open_order())
+    assert r0.status_code == 200
+    before = client.get("/api/fund/portfolio").json()
+    r = client.post("/api/fund/phase", json={"phase": "moderate"})
+    assert r.status_code == 200
+    after = client.get("/api/fund/portfolio").json()
+    assert after["status"]["phase"] == "moderate"
+    assert len(before["positions"]) == 1
+    assert len(after["positions"]) == 1
+    assert after["positions"][0]["id"] == before["positions"][0]["id"]
+    assert after["positions"][0]["entry"] == before["positions"][0]["entry"]

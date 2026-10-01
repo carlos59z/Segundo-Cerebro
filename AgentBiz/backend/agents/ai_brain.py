@@ -2,12 +2,35 @@ import json
 import sqlite3
 import subprocess
 import os
+import asyncio
 import tempfile
 import urllib.request
 from typing import List, Dict
 from datetime import datetime
 
-NVIDIA_API_KEY = "NVIDIA_KEY_REDACTED_BY_FILTER_REPO"
+
+def _load_secret(name: str, default: str = "") -> str:
+    val = os.environ.get(name, "").strip()
+    if val:
+        return val
+    here = os.path.dirname(os.path.abspath(__file__))
+    for env_path in (
+        os.path.join(here, "..", "..", "..", ".env"),      # raiz del repo
+        os.path.join(here, "..", ".env"),                  # AgentBiz/.env
+        os.path.join(here, "..", "..", "backend", ".env"), # AgentBiz/backend/.env
+    ):
+        try:
+            with open(env_path, encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line.startswith(name + "="):
+                        return line.split("=", 1)[1].strip().strip('"').strip("'")
+        except OSError:
+            continue
+    return default
+
+
+NVIDIA_API_KEY = _load_secret("NVIDIA_API_KEY")
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 DB_PATH = "C:\\Users\\USUARIO\\OneDrive\\Desktop\\Segundo-Cerebro\\AgentBiz\\backend\\agentbiz.db"
 CURL_PATH = "C:\\Windows\\System32\\curl.exe"
@@ -166,7 +189,8 @@ def ask_nvidia_sync(prompt: str, system: str = "", model: str = None,
 async def ask_nvidia(prompt: str, system: str = "", model: str = None,
                      max_tokens: int = 500, temperature: float = 0.7,
                      agent_id: str = None) -> str:
-    return ask_nvidia_sync(prompt, system, model, max_tokens, temperature, agent_id)
+    return await asyncio.to_thread(
+        ask_nvidia_sync, prompt, system, model, max_tokens, temperature, agent_id)
 
 async def scout_research(topic: str) -> str:
     return await ask_nvidia(
@@ -275,6 +299,9 @@ async def risk_review(order: dict) -> dict:
     raw = await ask_nvidia(prompt, system=AGENT_SYSTEM_PROMPTS["content"],
                            temperature=0.2, max_tokens=120, agent_id="content")
     text = (raw or "").strip()
-    if "RECHAZA" in text.upper():
-        return {"decision": "rechaza", "reason": text[:200]}
-    return {"decision": "aprueba", "reason": text[:200]}
+    upper = text.upper()
+    if upper.startswith("APRUEBA"):
+        return {"decision": "aprueba", "reason": text[:200]}
+    # RECHAZA explícito o cualquier salida no interpretable (timeout, error de
+    # API, formato raro) -> rechaza: una revision que no corrió no aprueba.
+    return {"decision": "rechaza", "reason": text[:200]}

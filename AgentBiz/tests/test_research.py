@@ -173,3 +173,59 @@ def test_run_research_fetches_each_symbol_once(tmp_path, monkeypatch):
     n_symbols = sum(len(v) for v in research.list_universe().values())
     assert len(calls) == n_symbols  # una descarga por simbolo, no por spec x simbolo
     assert len(calls) == len(set(calls))
+
+
+def test_run_research_noconsume_on_sin_datos(tmp_path, monkeypatch):
+    db = str(tmp_path / "d.db")
+    monkeypatch.setattr(research, "generate_hypotheses", lambda phase, n=3: [
+        {"nombre": "v", "base": "sma_cross", "params": {"fast": 5, "slow": 20}}])
+
+    def boom(sym, period="1y", interval="1d"):
+        raise RuntimeError("sin red")
+
+    monkeypatch.setattr(research, "get_ohlc", boom)
+    out = research.run_research(db_path=db, phase="aggressive")
+    assert out["status"] == "sin_datos"
+    assert research.known_fingerprints(db) == set()  # no consumida sin probar
+
+
+def test_run_research_skips_invalid_hypothesis(tmp_path, monkeypatch):
+    import numpy as np
+    db = str(tmp_path / "e.db")
+    idx = pd.date_range("2025-01-01", periods=120, freq="D", tz="UTC")
+    up = np.linspace(100, 150, 30)
+    down = np.linspace(150, 100, 30)
+    close = pd.Series(np.concatenate([up, down, up, down]), index=idx)
+    fake = pd.DataFrame({"open": close.shift(1).fillna(100), "high": close + 1,
+                         "low": close - 1, "close": close, "volume": 1000.0},
+                        index=idx)
+    monkeypatch.setattr(research, "generate_hypotheses", lambda phase, n=3: [
+        {"nombre": "mala", "base": "no_existe", "params": {}},
+        {"nombre": "buena", "base": "sma_cross", "params": {"fast": 5, "slow": 20}}])
+    monkeypatch.setattr(research, "get_ohlc",
+                        lambda sym, period="1y", interval="1d": fake)
+    out = research.run_research(db_path=db, phase="aggressive")
+    assert out["status"] == "ok" and out["tested"] == 1
+
+
+def test_run_research_ignores_ineligible(tmp_path, monkeypatch):
+    import numpy as np
+    db = str(tmp_path / "g.db")
+    idx = pd.date_range("2025-01-01", periods=120, freq="D", tz="UTC")
+    up = np.linspace(100, 150, 30)
+    down = np.linspace(150, 100, 30)
+    close = pd.Series(np.concatenate([up, down, up, down]), index=idx)
+    fake = pd.DataFrame({"open": close.shift(1).fillna(100), "high": close + 1,
+                         "low": close - 1, "close": close, "volume": 1000.0},
+                        index=idx)
+    monkeypatch.setattr(research, "generate_hypotheses", lambda phase, n=3: [
+        {"nombre": "v", "base": "sma_cross", "params": {"fast": 5, "slow": 20}}])
+    monkeypatch.setattr(research, "get_ohlc",
+                        lambda sym, period="1y", interval="1d": fake)
+    monkeypatch.setattr(research, "run_backtest", lambda df, sig, cost: {
+        "total_return": 0.5, "annualized": 0.5, "sharpe": 3.0,
+        "max_drawdown": -0.9, "win_rate": 0.9, "profit_factor": 9.0,
+        "n_trades": 10})
+    out = research.run_research(db_path=db, phase="aggressive")
+    assert out["standard"] is None
+    assert research.get_standard(db) is None

@@ -1,3 +1,12 @@
 .obsidian/plugins/
 .obsidian/workspace.json
 .obsidian/workspace-mobile.json
+# Segundos-Cerebro: secretos y artefactos locales
+.env
+*.env.local
+__pycache__/
+*.pyc
+*.db
+*.db-wal
+*.db-shm
+node_modules/

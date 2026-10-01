@@ -249,11 +249,14 @@ def run_research(db_path="fund.db", phase=None, period="1y"):
     known = known_fingerprints(db_path)
     new_specs = []
     for h in hypotheses:
-        for concrete in expand_grid(h):
+        try:
+            variants = expand_grid(h)
+        except ValueError:
+            continue  # hipotesis invalida: se salta, no aborta ni consume el ciclo
+        for concrete in variants:
             fp = spec_fingerprint(concrete["base"], concrete["params"])
             if fp in known:
                 continue
-            save_spec(db_path, concrete["base"], concrete["params"], concrete["nombre"], phase)
             new_specs.append((fp, concrete))
             known.add(fp)
     if not new_specs:
@@ -267,6 +270,13 @@ def run_research(db_path="fund.db", phase=None, period="1y"):
                 dfs[sym] = get_ohlc(sym, period=period, interval="1d")
             except Exception:
                 continue
+    if not dfs:
+        # sin datos: NO se guardan las SPECs, para no consumirlas sin probar
+        return {"status": "sin_datos", "tested": len(new_specs), "runs": 0,
+                "standard": get_standard(db_path)}
+    for fp, concrete in new_specs:
+        save_spec(db_path, concrete["base"], concrete["params"],
+                  concrete["nombre"], phase)
     results = []
     for fp, spec in new_specs:
         try:
@@ -289,7 +299,7 @@ def run_research(db_path="fund.db", phase=None, period="1y"):
                                 "base": spec["base"], **m})
     by_spec = {}
     for r in results:
-        if r["n_trades"] >= 2:
+        if r["n_trades"] >= 2 and r["eligible"]:
             by_spec.setdefault(r["fp"], []).append(r)
     if not by_spec:
         return {"status": "sin_datos", "tested": len(new_specs), "runs": len(results),
