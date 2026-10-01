@@ -146,3 +146,30 @@ def test_run_research_uses_vigente_phase_when_none(tmp_path, monkeypatch):
                             AssertionError(f"phase={phase}")))
     with pytest.raises(AssertionError, match="phase=moderate"):
         research.run_research(db_path=db, phase=None)
+
+
+def test_run_research_fetches_each_symbol_once(tmp_path, monkeypatch):
+    import numpy as np
+    db = str(tmp_path / "f.db")
+    idx = pd.date_range("2025-01-01", periods=120, freq="D", tz="UTC")
+    up = np.linspace(100, 150, 30)
+    down = np.linspace(150, 100, 30)
+    close = pd.Series(np.concatenate([up, down, up, down]), index=idx)
+    fake = pd.DataFrame({"open": close.shift(1).fillna(100), "high": close + 1,
+                         "low": close - 1, "close": close, "volume": 1000.0},
+                        index=idx)
+    calls = []
+
+    def counting(sym, period="1y", interval="1d"):
+        calls.append(sym)
+        return fake
+
+    monkeypatch.setattr(research, "generate_hypotheses",
+                        lambda phase, n=3: [{"nombre": "g", "base": "sma_cross",
+                                             "grid": {"fast": [5, 10], "slow": [20]}}])
+    monkeypatch.setattr(research, "get_ohlc", counting)
+    out = research.run_research(db_path=db, phase="aggressive")
+    assert out["status"] == "ok"
+    n_symbols = sum(len(v) for v in research.list_universe().values())
+    assert len(calls) == n_symbols  # una descarga por simbolo, no por spec x simbolo
+    assert len(calls) == len(set(calls))

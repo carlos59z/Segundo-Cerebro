@@ -260,6 +260,13 @@ def run_research(db_path="fund.db", phase=None, period="1y"):
         return {"status": "sin_specs_nuevas", "tested": 0, "runs": 0,
                 "standard": get_standard(db_path)}
     universe = list_universe()
+    dfs = {}
+    for market, symbols in universe.items():
+        for sym in symbols:
+            try:
+                dfs[sym] = get_ohlc(sym, period=period, interval="1d")
+            except Exception:
+                continue
     results = []
     for fp, spec in new_specs:
         try:
@@ -269,8 +276,10 @@ def run_research(db_path="fund.db", phase=None, period="1y"):
         for market, symbols in universe.items():
             cost = COSTS.get(market, COSTS["crypto"])
             for sym in symbols:
+                df = dfs.get(sym)
+                if df is None:
+                    continue
                 try:
-                    df = get_ohlc(sym, period=period, interval="1d")
                     m = run_backtest(df, sig_fn(df), cost)
                 except Exception:
                     continue
