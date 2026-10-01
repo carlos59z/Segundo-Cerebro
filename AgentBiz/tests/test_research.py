@@ -90,3 +90,59 @@ def test_insert_and_latest_results(db):
     research.insert_strategy_results(db, rows, "aggressive")
     latest = research.latest_results(db, 10)
     assert latest[0]["symbol"] == "SPY" and latest[0]["sharpe"] == 1.5
+
+
+def test_parse_hypotheses_fenced_and_prosa():
+    raw = ('Aqui tienes las hipotesis:\n```json\n'
+           '[{"nombre": "a", "base": "sma_cross", "params": {"fast": 5}}]\n```\nListo.')
+    specs = research.parse_hypotheses(raw)
+    assert specs[0]["base"] == "sma_cross"
+
+
+def test_parse_hypotheses_filters_junk_keeps_valid():
+    raw = '[{"foo": 1}, "texto", {"nombre": "ok", "base": "rsi_reversion"}]'
+    specs = research.parse_hypotheses(raw)
+    assert len(specs) == 1 and specs[0]["base"] == "rsi_reversion"
+
+
+def test_parse_hypotheses_without_json_raises():
+    with pytest.raises(ValueError, match="JSON"):
+        research.parse_hypotheses("no puedo generar estrategias hoy")
+    with pytest.raises(ValueError):
+        research.parse_hypotheses('{"base": "sma_cross"}')
+
+
+def test_run_research_cycle_and_dedupe(tmp_path, monkeypatch):
+    import numpy as np
+    db = str(tmp_path / "fund.db")
+    up = np.linspace(100, 150, 30)
+    down = np.linspace(150, 100, 30)
+    idx = pd.date_range("2025-01-01", periods=120, freq="D", tz="UTC")
+    close = pd.Series(np.concatenate([up, down, up, down]), index=idx)
+    fake = pd.DataFrame({"open": close.shift(1).fillna(100), "high": close + 1,
+                         "low": close - 1, "close": close, "volume": 1000.0},
+                        index=idx)
+    monkeypatch.setattr(research, "generate_hypotheses",
+                        lambda phase, n=3: [{"nombre": "g1", "base": "sma_cross",
+                                             "grid": {"fast": [5], "slow": [20]}}])
+    monkeypatch.setattr(research, "get_ohlc",
+                        lambda sym, period="1y", interval="1d": fake)
+    out = research.run_research(db_path=db, phase="aggressive")
+    assert out["status"] == "ok" and out["tested"] == 1
+    assert out["runs"] > 0
+    std = research.get_standard(db_path=db)
+    assert std is not None and std["base"] == "sma_cross"
+    assert std["fingerprint"] in research.known_fingerprints(db)
+    out2 = research.run_research(db_path=db, phase="aggressive")
+    assert out2["status"] == "sin_specs_nuevas" and out2["tested"] == 0
+
+
+def test_run_research_uses_vigente_phase_when_none(tmp_path, monkeypatch):
+    db = str(tmp_path / "p.db")
+    research.init_research_db(db)
+    research.set_meta(db, "phase", "moderate")
+    monkeypatch.setattr(research, "generate_hypotheses",
+                        lambda phase, n=3: (_ for _ in ()).throw(
+                            AssertionError(f"phase={phase}")))
+    with pytest.raises(AssertionError, match="phase=moderate"):
+        research.run_research(db_path=db, phase=None)
