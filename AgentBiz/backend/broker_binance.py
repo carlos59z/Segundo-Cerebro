@@ -9,7 +9,9 @@ import requests
 
 
 class BrokerError(Exception):
-    pass
+    def __init__(self, msg, status=None):
+        super().__init__(msg)
+        self.status = status
 
 
 class BrokerOrderInvalid(BrokerError):
@@ -104,7 +106,7 @@ def _request(method, path, params, market_type, signed=True):
         raise BrokerError(f"sin conexion con binance: {e}")
     js = r.json() if r.content else {}
     if r.status_code >= 400:
-        raise BrokerError(f"binance {r.status_code}: {js}")
+        raise BrokerError(f"binance {r.status_code}: {js}", status=r.status_code)
     return js
 
 
@@ -198,8 +200,8 @@ def close_on_exchange(symbol, market_type, side, qty_usd, leverage, entry):
         raise BrokerError("close_on_exchange no aplica en modo paper")
     bsym = to_binance_symbol(symbol, market_type)
     if market_type == "futures":
-        js = _request("GET", "/fapi/v1/positionRisk", {"symbol": bsym}, market_type)
-        amt = float(js.get("amt") or 0)
+        js = _request("GET", "/fapi/v2/positionRisk", {"symbol": bsym}, market_type)
+        amt = float(js.get("positionAmt") or js.get("amt") or 0)
         if abs(amt) < 1e-12:
             return {"closed": False, "fill_price": None,
                     "reason": "ya flat en el exchange"}
@@ -245,6 +247,9 @@ def close_sync(symbol, side, qty_usd, leverage, entry):
             return r
     except BrokerOrderInvalid:
         pass
+    except BrokerError as e:
+        if e.status not in (401, 403, 404):
+            raise
     r = close_on_exchange(symbol, "spot", side, qty_usd, leverage, entry)
     r["market_type"] = "spot"
     return r

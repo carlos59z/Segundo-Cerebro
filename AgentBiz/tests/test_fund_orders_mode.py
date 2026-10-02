@@ -6,6 +6,12 @@ def _open(**over):
     return body
 
 
+def test_suite_env_is_isolated_from_dotenv():
+    import os
+    assert os.environ.get("EXECUTION_MODE") == "paper"
+    assert os.environ.get("AUTO_TRADER") == "0"
+
+
 def test_paper_mode_never_calls_broker(client, monkeypatch):
     import api.fund as fmod
 

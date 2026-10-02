@@ -126,6 +126,7 @@ def test_http_error_maps_to_broker_error(monkeypatch):
     with pytest.raises(BrokerError) as e:
         bb._request("GET", "/api/v3/ping", {}, "spot")
     assert "-1121" in str(e.value)
+    assert e.value.status == 400
 
 
 def test_place_spot_buy_market_order(monkeypatch):
@@ -200,14 +201,14 @@ def test_close_futures_already_flat_is_noop(monkeypatch):
 
     def fake(method, path, params, market_type, signed=True):
         calls.append(path)
-        if path == "/fapi/v1/positionRisk":
-            return {"symbol": "BTCUSDT", "amt": "0"}
+        if path == "/fapi/v2/positionRisk":
+            return {"symbol": "BTCUSDT", "positionAmt": "0"}
         return {}
 
     monkeypatch.setattr(bb, "_request", fake)
     out = bb.close_on_exchange("BTC", "futures", "long", 100.0, 2.0, 100.0)
     assert out["closed"] is False
-    assert calls == ["/fapi/v1/positionRisk"]
+    assert calls == ["/fapi/v2/positionRisk"]
 
 
 def test_close_futures_cancels_protection_and_closes(monkeypatch):
@@ -217,8 +218,8 @@ def test_close_futures_cancels_protection_and_closes(monkeypatch):
 
     def fake(method, path, params, market_type, signed=True):
         calls.append({"method": method, "path": path, "params": params})
-        if path == "/fapi/v1/positionRisk":
-            return {"symbol": "BTCUSDT", "amt": "-0.25"}
+        if path == "/fapi/v2/positionRisk":
+            return {"symbol": "BTCUSDT", "positionAmt": "-0.25"}
         if path == "/fapi/v1/openOrders":
             return [{"orderId": 5}, {"orderId": 6}]
         if params.get("type") == "MARKET":
@@ -230,7 +231,7 @@ def test_close_futures_cancels_protection_and_closes(monkeypatch):
     assert out["closed"] is True
     assert out["fill_price"] == 101.0
     methods = [(c["method"], c["path"]) for c in calls]
-    assert methods[:3] == [("GET", "/fapi/v1/positionRisk"),
+    assert methods[:3] == [("GET", "/fapi/v2/positionRisk"),
                            ("GET", "/fapi/v1/openOrders"),
                            ("DELETE", "/fapi/v1/order")]
     last = calls[-1]
@@ -289,6 +290,51 @@ def test_close_sync_falls_back_to_spot(monkeypatch):
     assert seen == ["futures", "spot"]
     assert out["closed"] is True
     assert out["market_type"] == "spot"
+
+
+@pytest.mark.parametrize("status", [401, 403, 404])
+def test_close_sync_futures_unavailable_falls_back_to_spot(monkeypatch, status):
+    _env_testnet(monkeypatch)
+    seen = []
+
+    def fake_close(symbol, market_type, side, qty_usd, leverage, entry):
+        seen.append(market_type)
+        if market_type == "futures":
+            raise BrokerError(f"binance {status}: {{}}", status=status)
+        return {"closed": True, "fill_price": 84000.0, "reason": "broker close"}
+
+    monkeypatch.setattr(bb, "close_on_exchange", fake_close)
+    out = bb.close_sync("BTC", "long", 100.0, 1.0, 84000.0)
+    assert seen == ["futures", "spot"]
+    assert out["closed"] is True
+    assert out["market_type"] == "spot"
+
+
+def test_close_sync_futures_transient_error_propagates(monkeypatch):
+    _env_testnet(monkeypatch)
+    seen = []
+
+    def fake_close(symbol, market_type, side, qty_usd, leverage, entry):
+        seen.append(market_type)
+        if market_type == "futures":
+            raise BrokerError("binance 500: {}", status=500)
+        raise AssertionError("no debe intentar spot en error transitorio")
+
+    monkeypatch.setattr(bb, "close_on_exchange", fake_close)
+    with pytest.raises(BrokerError):
+        bb.close_sync("BTC", "long", 100.0, 1.0, 84000.0)
+    assert seen == ["futures"]
+
+
+def test_close_sync_connection_error_propagates(monkeypatch):
+    _env_testnet(monkeypatch)
+
+    def fake_close(symbol, market_type, side, qty_usd, leverage, entry):
+        raise BrokerError("sin conexion con binance: timeout")
+
+    monkeypatch.setattr(bb, "close_on_exchange", fake_close)
+    with pytest.raises(BrokerError):
+        bb.close_sync("BTC", "long", 100.0, 1.0, 84000.0)
 
 
 def test_close_sync_in_paper_returns_noop(monkeypatch):
