@@ -204,7 +204,7 @@ def test_chat_with_agent_hardens_system_prompt(monkeypatch):
     res = asyncio.run(ab.chat_with_agent("social", "hola"))
     assert res == "ok"
     assert "SOLO con la respuesta final" in captured["system"]
-    assert captured["max_tokens"] >= 1000
+    assert captured["max_tokens"] >= 4000
 
 
 def test_mark_updates_unrealized_and_curve(client, monkeypatch):

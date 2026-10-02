@@ -245,7 +245,7 @@ async def analytics_report(data: dict) -> str:
 async def chat_with_agent(agent_id: str, message: str) -> str:
     system = AGENT_SYSTEM_PROMPTS.get(agent_id, AGENT_SYSTEM_PROMPTS["scout"])
     return await ask_nvidia(message, system=system, agent_id=agent_id,
-                            max_tokens=1000)
+                            max_tokens=4000)
 
 def _fetch_trader(symbol: str, interval: str, risk: str) -> dict:
     url = f"{TRADER_API}/api/operation/{symbol}?interval={interval}&risk={risk}"
