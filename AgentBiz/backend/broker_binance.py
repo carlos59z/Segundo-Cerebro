@@ -91,13 +91,15 @@ def _request(method, path, params, market_type, signed=True):
         raise BrokerError("broker no aplica en modo paper")
     cfg = load_keys(mode)
     q = dict(params or {})
-    q.update(timestamp=int(time.time() * 1000), recvWindow=5000)
+    if signed:
+        q.update(timestamp=int(time.time() * 1000), recvWindow=5000)
     query = urllib.parse.urlencode(q)
     if signed:
         query += "&signature=" + _sign(cfg["secret"], query)
     url = f"{base_url(mode, market_type)}{path}?{query}"
     try:
-        r = requests.request(method, url, timeout=15)
+        r = requests.request(method, url, timeout=15,
+                             headers={"X-MBX-APIKEY": cfg["key"]})
     except requests.RequestException as e:
         raise BrokerError(f"sin conexion con binance: {e}")
     js = r.json() if r.content else {}

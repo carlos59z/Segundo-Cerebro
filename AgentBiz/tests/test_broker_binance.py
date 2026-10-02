@@ -97,8 +97,9 @@ def test_request_query_is_signed(monkeypatch):
     _env_testnet(monkeypatch)
     seen = {}
 
-    def fake_request(method, url, timeout=None):
+    def fake_request(method, url, timeout=None, headers=None):
         seen["url"] = url
+        seen["headers"] = headers
         return _Resp(200, {})
 
     monkeypatch.setattr(bb, "requests", SimpleNamespace(request=fake_request))
@@ -106,17 +107,19 @@ def test_request_query_is_signed(monkeypatch):
     assert out == {}
     url = seen["url"]
     assert url.startswith("https://testnet.binance.vision/api/v3/ping?")
-    assert "timestamp=" in url and "recvWindow=5000" in url
+    assert "timestamp=" not in url and "signature=" not in url
+    assert seen["headers"]["X-MBX-APIKEY"] == "kk"
 
     bb._request("GET", "/api/v3/time", {}, "spot")
     url = seen["url"]
-    assert "signature=" in url and "timestamp=" in url
+    assert "signature=" in url and "timestamp=" in url and "recvWindow=5000" in url
+    assert seen["headers"]["X-MBX-APIKEY"] == "kk"
 
 
 def test_http_error_maps_to_broker_error(monkeypatch):
     _env_testnet(monkeypatch)
 
-    def fake_request(method, url, timeout=None):
+    def fake_request(method, url, timeout=None, headers=None):
         return _Resp(400, {"code": -1121, "msg": "Invalid symbol."})
 
     monkeypatch.setattr(bb, "requests", SimpleNamespace(request=fake_request))
