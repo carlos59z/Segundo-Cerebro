@@ -53,9 +53,13 @@ class EarningRequest(BaseModel):
     amount: float
     description: str = ""
 
+from auto_trader import start_auto_trader
+
+
 @app.on_event("startup")
 async def startup():
     init_db()
+    start_auto_trader()
 
 AGENT_MAP = {
     'scout': scout_research,

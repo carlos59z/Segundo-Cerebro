@@ -106,3 +106,77 @@ def operation_to_order(op, symbol, phase, market_type, equity):
             "leverage": leverage, "entry": entry, "stop_loss": stop_loss,
             "take_profit": take_profit, "strategy": "auto",
             "market_type": market_type, "review": True}
+
+
+import api.fund as fmod
+
+
+async def tick():
+    summary = {"marked": 0, "ordered": 0, "skipped": 0, "skip_reason": None}
+    try:
+        m = await fmod.fund_mark()
+        summary["marked"] = m.get("closed", 0)
+    except Exception as e:
+        log.warning("mark fallo: %s", e)
+    p = Portfolio(fmod.FUND_DB)
+    st = p.get_status()
+    lo, hi = PHASES[p.phase]["risk_pct"]
+    ok, why = p.can_open((lo + hi) / 2)
+    if not ok:
+        summary["skip_reason"] = why
+        log.info("tick skip: %s", why)
+        return summary
+    open_symbols = {x["symbol"] for x in p.get_positions("open")}
+    results = research.latest_results(fmod.FUND_DB, 20)
+    cands = select_candidates(results, open_symbols, COOLDOWN, time.time())
+    for c in cands[:1]:
+        op = await asyncio.to_thread(get_operation, c["symbol"])
+        body = operation_to_order(op, c["symbol"], p.phase, market_type(),
+                                  st["equity"])
+        if not body:
+            summary["skipped"] += 1
+            continue
+        body["strategy"] = f"auto-{c.get('strategy', 'x')}"
+        try:
+            await fmod.fund_orders(fmod.OrderRequest(**body))
+        except Exception as e:
+            detail = getattr(e, "detail", str(e))
+            send_telegram(f"auto-trader X {body['symbol']}: {detail}")
+            summary["skipped"] += 1
+            continue
+        COOLDOWN[body["symbol"]] = time.time()
+        send_telegram(
+            f"auto-trader OK {body['side']} {body['symbol']} @ {body['entry']} "
+            f"sl={body['stop_loss']} tp={body['take_profit']} "
+            f"qty=${body['qty_usd']} lev={body['leverage']}x "
+            f"[{execution_mode()}/{market_type()}]")
+        summary["ordered"] += 1
+    return summary
+
+
+async def safe_tick():
+    try:
+        return await tick()
+    except Exception as e:
+        log.exception("tick revienta")
+        send_telegram(f"auto-trader ERROR: {e}")
+        return None
+
+
+async def run_loop():
+    log.info("auto-trader iniciado mode=%s interval=%s",
+             execution_mode(), os.getenv("AUTO_TRADER_INTERVAL_MIN", "15"))
+    while True:
+        await safe_tick()
+        try:
+            mins = float(os.getenv("AUTO_TRADER_INTERVAL_MIN", "15"))
+        except ValueError:
+            mins = 15.0
+        await asyncio.sleep(max(1.0, mins) * 60)
+
+
+def start_auto_trader():
+    if os.getenv("AUTO_TRADER") != "1":
+        return False
+    asyncio.create_task(run_loop())
+    return True
