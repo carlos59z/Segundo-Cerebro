@@ -37,12 +37,12 @@ CURL_PATH = "C:\\Windows\\System32\\curl.exe"
 TRADER_API = "http://127.0.0.1:5001"
 
 AGENT_MODELS = {
-    "scout": "nvidia/nemotron-3-super-120b-a12b",
+    "scout": "google/gemma-4-31b-it",
     "content": "nvidia/nemotron-3-super-120b-a12b",
     "affiliate": "google/gemma-4-31b-it",
     "trading": "nvidia/nemotron-3-super-120b-a12b",
     "freelancer": "nvidia/nemotron-3-super-120b-a12b",
-    "social": "nvidia/nemotron-3-super-120b-a12b",
+    "social": "google/gemma-4-31b-it",
     "analytics": "nvidia/nemotron-3-super-120b-a12b",
     "default": "nvidia/nemotron-3-super-120b-a12b",
 }
