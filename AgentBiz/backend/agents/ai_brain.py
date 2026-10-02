@@ -32,7 +32,8 @@ def _load_secret(name: str, default: str = "") -> str:
 
 NVIDIA_API_KEY = _load_secret("NVIDIA_API_KEY")
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
-DB_PATH = "C:\\Users\\USUARIO\\OneDrive\\Desktop\\Segundo-Cerebro\\AgentBiz\\backend\\agentbiz.db"
+DB_PATH = os.environ.get("AGENTBIZ_DB") or os.path.abspath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "agentbiz.db"))
 CURL_PATH = "C:\\Windows\\System32\\curl.exe"
 TRADER_API = "http://127.0.0.1:5001"
 

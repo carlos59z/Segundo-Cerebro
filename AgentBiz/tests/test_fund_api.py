@@ -321,3 +321,20 @@ def test_chat_agent_models_are_instruct():
     import agents.ai_brain as ab
     assert ab.AGENT_MODELS["scout"] == "google/gemma-4-31b-it"
     assert ab.AGENT_MODELS["social"] == "google/gemma-4-31b-it"
+
+
+def test_ai_brain_db_path_is_portable(monkeypatch):
+    import importlib
+    import os
+    import agents.ai_brain as ab
+
+    monkeypatch.setenv("AGENTBIZ_DB", r"C:\temp\otra.db")
+    importlib.reload(ab)
+    assert ab.DB_PATH == r"C:\temp\otra.db"
+
+    monkeypatch.delenv("AGENTBIZ_DB")
+    importlib.reload(ab)
+    expected = os.path.abspath(os.path.join(
+        os.path.dirname(os.path.abspath(ab.__file__)), "..", "agentbiz.db"))
+    assert ab.DB_PATH == expected
+    assert ab.memory.db_path == expected
