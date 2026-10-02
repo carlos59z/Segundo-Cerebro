@@ -116,8 +116,7 @@ async def tick():
     summary = {"marked": 0, "ordered": 0, "skipped": 0, "skip_reason": None}
     try:
         m = await fmod.fund_mark()
-        closed = m.get("closed", 0)
-        summary["marked"] = len(closed) if isinstance(closed, list) else closed
+        summary["marked"] = m.get("marked", 0)
     except Exception as e:
         log.warning("mark fallo: %s", e)
     p = Portfolio(fmod.FUND_DB)

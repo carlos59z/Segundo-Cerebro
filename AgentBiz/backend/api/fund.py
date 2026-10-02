@@ -148,7 +148,7 @@ async def fund_orders(req: OrderRequest):
                         req.side, req.qty_usd, req.leverage, req.entry)
                     send_telegram(f"orden {req.symbol} rechazada post-fill; "
                                   f"compensacion: {bres}")
-                except BrokerError as ce:
+                except Exception as ce:
                     send_telegram(f"CRITICO: fill huerfano {req.symbol}: {ce}")
             raise HTTPException(status_code=409, detail=str(e))
         await asyncio.to_thread(lambda: _pf().record_equity())

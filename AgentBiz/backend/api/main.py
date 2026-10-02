@@ -57,7 +57,7 @@ class EarningRequest(BaseModel):
     description: str = ""
 
 from auto_trader import start_auto_trader
-from broker_binance import execution_mode, load_keys, BrokerError
+from broker_binance import execution_mode, load_keys
 
 
 @app.on_event("startup")

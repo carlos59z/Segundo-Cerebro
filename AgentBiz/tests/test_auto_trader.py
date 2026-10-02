@@ -85,7 +85,7 @@ def _wire_tick(monkeypatch, client, results=None, op=None):
     import api.fund as fmod
 
     async def fake_mark():
-        return {"closed": [{}]}
+        return {"marked": 1, "closed": [{}]}
 
     monkeypatch.setattr(fmod, "fund_mark", fake_mark)
     monkeypatch.setattr(at.research, "latest_results",
