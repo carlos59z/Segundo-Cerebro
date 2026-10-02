@@ -226,7 +226,9 @@ class Portfolio:
         finally:
             c.close()
         self._set_meta("daily_pnl", self._meta("daily_pnl") + pnl)
-        return {"pnl": round(pnl, 2), "reason": reason, "symbol": symbol}
+        return {"pnl": round(pnl, 2), "reason": reason, "symbol": symbol,
+                "position_id": position_id, "side": side, "entry": entry,
+                "qty_usd": qty_usd, "leverage": leverage}
 
     def mark_to_market(self, prices, bars=None):
         """Marca unrealized con precios dados y cierra posiciones cuyo SL/TP toca la barra."""

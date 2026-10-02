@@ -9,7 +9,9 @@ from backtester import rank_universe
 from market_data import get_price
 import research
 from broker_binance import (BrokerError, BrokerOrderInvalid, execution_mode,
-                            validate_order, place_order, close_on_exchange)
+                            validate_order, place_order, close_on_exchange,
+                            close_sync)
+from notify import send_telegram
 
 router = APIRouter(prefix="/api/fund", tags=["fund"])
 FUND_DB = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "fund.db"))
@@ -207,9 +209,20 @@ async def fund_mark():
             raise HTTPException(status_code=409, detail=str(e))
         if prices or not positions:
             p.record_equity()
+        sync_failed = []
+        mode = execution_mode()
+        if mode != "paper" and closed:
+            for c in closed:
+                try:
+                    close_sync(c["symbol"], c["side"], c["qty_usd"],
+                               c["leverage"], c["entry"])
+                except BrokerError as e:
+                    sync_failed.append(c["symbol"])
+                    send_telegram(f"mark: sync broker fallo {c['symbol']}: {e}")
         st = p.get_status()
         return {"marked": marked, "open": st["open_positions"],
-                "closed": closed, "failed": failed, "status": st}
+                "closed": closed, "failed": failed, "broker_sync_failed": sync_failed,
+                "status": st}
     return await asyncio.to_thread(work)
 
 
