@@ -8,6 +8,8 @@ from agents.ai_brain import risk_review
 from backtester import rank_universe
 from market_data import get_price
 import research
+from broker_binance import (BrokerError, BrokerOrderInvalid, execution_mode,
+                            validate_order, place_order, close_on_exchange)
 
 router = APIRouter(prefix="/api/fund", tags=["fund"])
 FUND_DB = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "fund.db"))
@@ -76,6 +78,7 @@ class OrderRequest(BaseModel):
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
     strategy: str = "manual"
+    market_type: Literal["spot", "futures"] = "spot"
     position_id: Optional[int] = None
     price: Optional[float] = None
     reason: str = "manual"
@@ -98,6 +101,12 @@ async def fund_orders(req: OrderRequest):
             raise HTTPException(status_code=422, detail="SL/TP obligatorios")
         if req.qty_usd <= 0 or req.entry <= 0:
             raise HTTPException(status_code=422, detail="qty_usd y entry deben ser > 0")
+        mode = execution_mode()
+        if mode != "paper":
+            try:
+                validate_order(req.side, req.leverage, req.symbol, req.market_type)
+            except BrokerOrderInvalid as e:
+                raise HTTPException(status_code=422, detail=str(e))
         review_result = None
         if req.review:
             review_result = await risk_review({
@@ -108,6 +117,16 @@ async def fund_orders(req: OrderRequest):
             if review_result["decision"] == "rechaza":
                 raise HTTPException(status_code=403,
                                     detail=f"Director de Riesgo rechaza: {review_result['reason']}")
+        order_id = None
+        if mode != "paper":
+            try:
+                fill = await asyncio.to_thread(
+                    place_order, req.symbol, req.side, req.qty_usd, req.leverage,
+                    req.market_type, req.entry, req.stop_loss, req.take_profit)
+            except BrokerError as e:
+                raise HTTPException(status_code=502, detail=f"broker: {e}")
+            req.entry = fill["fill_price"]
+            order_id = fill["order_id"]
         try:
             pos = await asyncio.to_thread(
                 lambda: _pf().open_position(
@@ -123,12 +142,32 @@ async def fund_orders(req: OrderRequest):
                 f"sl={req.stop_loss} tp={req.take_profit} [{req.strategy}]")
         except Exception:
             pass  # auditoria best-effort: no falla la orden
-        return {"position": pos, "risk_review": review_result}
+        return {"position": pos, "risk_review": review_result,
+                "execution": {"mode": mode,
+                              "broker": f"binance-{mode}" if mode != "paper" else None,
+                              "order_id": order_id}}
     if req.position_id is None or req.price is None:
         raise HTTPException(status_code=422, detail="position_id y price requeridos para cerrar")
+    mode = execution_mode()
+    exit_price = req.price
+    if mode != "paper":
+        p = _pf()
+        row = next((x for x in p.get_positions("open")
+                    if x["id"] == req.position_id), None)
+        if not row:
+            raise HTTPException(status_code=409,
+                                detail=f"posicion {req.position_id} no abierta")
+        try:
+            bres = await asyncio.to_thread(
+                close_on_exchange, row["symbol"], req.market_type, row["side"],
+                row["qty_usd"], row["leverage"], row["entry"])
+        except BrokerError as e:
+            raise HTTPException(status_code=502, detail=f"broker: {e}")
+        if bres.get("fill_price"):
+            exit_price = bres["fill_price"]
     try:
         trade = await asyncio.to_thread(
-            lambda: _pf().close_position(req.position_id, req.price, req.reason))
+            lambda: _pf().close_position(req.position_id, exit_price, req.reason))
     except RiskError as e:
         raise HTTPException(status_code=409, detail=str(e))
     await asyncio.to_thread(lambda: _pf().record_equity())
@@ -138,7 +177,10 @@ async def fund_orders(req: OrderRequest):
             f"posicion {req.position_id} a {req.price} ({req.reason})")
     except Exception:
         pass
-    return {"trade": trade, "risk_review": None}
+    return {"trade": trade, "risk_review": None,
+            "execution": {"mode": mode,
+                          "broker": f"binance-{mode}" if mode != "paper" else None,
+                          "order_id": None}}
 
 
 @router.post("/mark")
