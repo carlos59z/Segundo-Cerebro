@@ -190,6 +190,23 @@ def test_phase_change_preserves_open_positions(client):
     assert after["positions"][0]["entry"] == before["positions"][0]["entry"]
 
 
+def test_chat_with_agent_hardens_system_prompt(monkeypatch):
+    import asyncio
+    import agents.ai_brain as ab
+    captured = {}
+
+    async def fake_ask(prompt, system="", **kw):
+        captured["system"] = system
+        captured["max_tokens"] = kw.get("max_tokens")
+        return "ok"
+
+    monkeypatch.setattr(ab, "ask_nvidia", fake_ask)
+    res = asyncio.run(ab.chat_with_agent("social", "hola"))
+    assert res == "ok"
+    assert "SOLO con la respuesta final" in captured["system"]
+    assert captured["max_tokens"] >= 1000
+
+
 def test_mark_updates_unrealized_and_curve(client, monkeypatch):
     import api.fund as fmod
     r0 = client.post("/api/fund/orders", json=_open_order())

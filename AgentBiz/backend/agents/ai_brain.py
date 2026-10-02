@@ -42,7 +42,7 @@ AGENT_MODELS = {
     "affiliate": "google/gemma-4-31b-it",
     "trading": "nvidia/nemotron-3-super-120b-a12b",
     "freelancer": "nvidia/nemotron-3-super-120b-a12b",
-    "social": "z-ai/glm-5.3",
+    "social": "nvidia/nemotron-3-super-120b-a12b",
     "analytics": "nvidia/nemotron-3-super-120b-a12b",
     "default": "nvidia/nemotron-3-super-120b-a12b",
 }
@@ -244,7 +244,8 @@ async def analytics_report(data: dict) -> str:
 
 async def chat_with_agent(agent_id: str, message: str) -> str:
     system = AGENT_SYSTEM_PROMPTS.get(agent_id, AGENT_SYSTEM_PROMPTS["scout"])
-    return await ask_nvidia(message, system=system, agent_id=agent_id)
+    return await ask_nvidia(message, system=system, agent_id=agent_id,
+                            max_tokens=1000)
 
 def _fetch_trader(symbol: str, interval: str, risk: str) -> dict:
     url = f"{TRADER_API}/api/operation/{symbol}?interval={interval}&risk={risk}"
