@@ -41,8 +41,8 @@
 - Test: `AgentBiz/tests/test_fund_api.py` (4 tests nuevos)
 
 **Interfaces:**
-- Consumes: `paper_portfolio.Portal.get_positions(status="open") -> list[dict]` (cols incl. `symbol`), `Portfolio.mark_to_market(prices: dict, bars=None) -> list[dict]` (cierra SL/TP y actualiza `unrealized`; `prices` es `{symbol: float}`), `Portfolio.record_equity() -> float`, `Portfolio.get_status() -> dict`, `market_data.get_price(symbol) -> float`.
-- Produces: `POST /api/fund/mark` → `{"marked": int, "open": int, "closed": list[dict], "status": dict}` — lo consume el nodo "Marcar a Mercado" del Task 3.
+- Consumes: `paper_portfolio.Portfolio.get_positions(status="open") -> list[dict]` (cols incl. `symbol`), `Portfolio.mark_to_market(prices: dict, bars=None) -> list[dict]` (cierra SL/TP y actualiza `unrealized`; `prices` es `{symbol: float}`), `Portfolio.record_equity() -> float`, `Portfolio.get_status() -> dict`, `market_data.get_price(symbol) -> float`.
+- Produces: `POST /api/fund/mark` → `{"marked": int, "open": int, "closed": list[dict], "failed": list[str], "status": dict}` — lo consume el nodo "Marcar a Mercado" del Task 3. (`failed` = símbolos sin precio; `RiskError` concurrente → 409.)
 
 - [ ] **Step 1: Escribir los tests fallando**
 
@@ -112,25 +112,36 @@ Expected: **4 failed** con `404 Not Found` (el endpoint no existe).
 
 - [ ] **Step 3: Implementar el endpoint**
 
-En `AgentBiz/backend/api/fund.py`: añadir import `from market_data import get_price` (junto a los imports existentes) y este endpoint (usar `asyncio.to_thread` en TODO — regla I1; los precios se obtienen por posición tolerando fallos individuales):
+En `AgentBiz/backend/api/fund.py`: añadir import `from market_data import get_price` (junto a los imports existentes) y este endpoint (usar `asyncio.to_thread` en TODO — regla I1; los precios se obtienen por posición tolerando fallos individuales). Ruling ejecución: siembra de línea base en la curva (el test 4 no podía pasar sin ella) + `failed` + 409 en `RiskError` + sin punto de curva si todas las cotizaciones fallan:
 
 ```python
 @router.post("/mark")
 async def fund_mark():
     def work():
         p = _pf()
+        if not p.get_equity_curve():
+            p.record_equity()  # linea base: capital inicial antes del 1er marcado
         positions = p.get_positions("open")
         prices = {}
+        failed = []
+        marked = 0
         for pos in positions:
+            sym = pos["symbol"]
             try:
-                prices[pos["symbol"]] = get_price(pos["symbol"])
+                prices[sym] = get_price(sym)
+                marked += 1
             except Exception:
-                continue
-        closed = p.mark_to_market(prices)
-        p.record_equity()
+                if sym not in failed:
+                    failed.append(sym)
+        try:
+            closed = p.mark_to_market(prices)
+        except RiskError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        if prices or not positions:
+            p.record_equity()
         st = p.get_status()
-        return {"marked": len(prices), "open": st["open_positions"],
-                "closed": closed, "status": st}
+        return {"marked": marked, "open": st["open_positions"],
+                "closed": closed, "failed": failed, "status": st}
     return await asyncio.to_thread(work)
 ```
 
@@ -352,23 +363,23 @@ Añadir al ledger:
 - [ ] **Step 1: Suite completa**
 
 Run: `$env:PYTHONUTF8="1"; C:\Python313\python.exe -m pytest AgentBiz/tests/ -q`
-Expected: **83 passed** (80 offline + 3 network).
+Expected: **84 passed** (81 offline + 3 network; el 81 incluye `test_chat_with_agent_hardens_system_prompt` agregado en el ruling de contenido del Task 3).
 
 - [ ] **Step 2: Regresión webhook unificado + chat + fondo**
 
 ```powershell
 # (payloads con [IO.File]::WriteAllText + --data-binary)
-# rama trading:  {"message":"analiza bitcoin"}   → 200, "response"
+# rama trading:  {"message":"analiza bitcoin"}   → 200, "ai_interpretation" (clave según ruling matriz; "response" solo en fallback)
 # rama negocio:  {"message":"háblame de scout"}  → 200, "response"
 # chat directo:  POST http://127.0.0.1:8000/api/chat/scout {"query":"hola"} → 200, "response"
 # fondo:         GET  http://127.0.0.1:8000/api/fund/status → 200, "portfolio"
 # mark vivo:     POST http://127.0.0.1:8000/api/fund/mark → 200, "status"
 ```
-Expected: todos 200. (La rama research del Task 2 debe haber terminado: `GET /api/v1/executions?workflowId=$v2id&limit=1` → `status:"success"`.)
+Expected: todos 200. (Research: verificar vía `GET /api/fund/strategies` → `standard.tested_at` presente — ruling Task 2; la exec 26 queda `error` histórico por ECONNABORTED aunque el ciclo terminó server-side.)
 
 - [ ] **Step 3: Ledger de cierre**
 
-Añadir al ledger: `Task 4: complete (suite 83 passed; regresión OK; Plan 3/Fase 5 cerrado).`
+Añadir al ledger: `Task 4: complete (suite 84 passed; regresión OK; Plan 3/Fase 5 cerrado).`
 
 ---
 

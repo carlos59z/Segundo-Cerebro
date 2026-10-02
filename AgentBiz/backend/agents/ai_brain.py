@@ -124,7 +124,7 @@ class ConversationMemory:
 memory = ConversationMemory()
 
 def ask_nvidia_sync(prompt: str, system: str = "", model: str = None,
-                    max_tokens: int = 500, temperature: float = 0.7,
+                    max_tokens: int = 1000, temperature: float = 0.7,
                     agent_id: str = None) -> str:
     if model is None:
         model = AGENT_MODELS.get(agent_id, AGENT_MODELS["default"])
@@ -187,7 +187,7 @@ def ask_nvidia_sync(prompt: str, system: str = "", model: str = None,
         return f"Error: {str(e)}"
 
 async def ask_nvidia(prompt: str, system: str = "", model: str = None,
-                     max_tokens: int = 500, temperature: float = 0.7,
+                     max_tokens: int = 1000, temperature: float = 0.7,
                      agent_id: str = None) -> str:
     return await asyncio.to_thread(
         ask_nvidia_sync, prompt, system, model, max_tokens, temperature, agent_id)
@@ -276,7 +276,7 @@ async def trading_ai_analysis(symbol: str = "BTCUSDT", interval: str = "1h",
           "que vigilar antes de operar y gestor de riesgo. Maximo 150 palabras, en espanol."
     )
     ai = await ask_nvidia(prompt, system=AGENT_SYSTEM_PROMPTS["trading"],
-                          temperature=0.4, max_tokens=600, agent_id="trading")
+                          temperature=0.4, max_tokens=1500, agent_id="trading")
 
     return {
         "error": False,
@@ -298,7 +298,8 @@ async def risk_review(order: dict) -> dict:
         "APRUEBA: <motivo corto>  o  RECHAZA: <motivo corto>."
     )
     raw = await ask_nvidia(prompt, system=AGENT_SYSTEM_PROMPTS["content"],
-                           temperature=0.2, max_tokens=120, agent_id="content")
+                           model="google/gemma-4-31b-it",
+                           temperature=0.2, max_tokens=300, agent_id="content")
     text = (raw or "").strip()
     upper = text.upper()
     if upper.startswith("APRUEBA"):

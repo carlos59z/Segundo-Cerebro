@@ -149,16 +149,25 @@ async def fund_mark():
             p.record_equity()  # linea base: capital inicial antes del 1er marcado
         positions = p.get_positions("open")
         prices = {}
+        failed = []
+        marked = 0
         for pos in positions:
+            sym = pos["symbol"]
             try:
-                prices[pos["symbol"]] = get_price(pos["symbol"])
+                prices[sym] = get_price(sym)
+                marked += 1
             except Exception:
-                continue
-        closed = p.mark_to_market(prices)
-        p.record_equity()
+                if sym not in failed:
+                    failed.append(sym)
+        try:
+            closed = p.mark_to_market(prices)
+        except RiskError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        if prices or not positions:
+            p.record_equity()
         st = p.get_status()
-        return {"marked": len(prices), "open": st["open_positions"],
-                "closed": closed, "status": st}
+        return {"marked": marked, "open": st["open_positions"],
+                "closed": closed, "failed": failed, "status": st}
     return await asyncio.to_thread(work)
 
 

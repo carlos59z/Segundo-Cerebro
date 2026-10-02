@@ -261,3 +261,63 @@ def test_mark_tolerates_price_failure(client, monkeypatch):
     assert r.json()["marked"] == 0
     pf = client.get("/api/fund/portfolio").json()
     assert pf["status"]["open_positions"] == 1
+
+
+def test_mark_partial_price_failure_reports_failed(client, monkeypatch):
+    import api.fund as fmod
+    client.post("/api/fund/orders", json=_open_order(symbol="BTC"))
+    client.post("/api/fund/orders", json=_open_order(symbol="ETH"))
+
+    def one_fails(sym):
+        if sym == "ETH":
+            raise RuntimeError("sin red")
+        return 105.0
+
+    monkeypatch.setattr(fmod, "get_price", one_fails)
+    r = client.post("/api/fund/mark")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["marked"] == 1
+    assert d["failed"] == ["ETH"]
+    assert d["open"] == 2
+    assert isinstance(d["status"], dict)
+    assert d["status"]["open_positions"] == d["open"]
+
+
+def test_mark_all_prices_fail_skips_curve(client, monkeypatch):
+    import api.fund as fmod
+    client.post("/api/fund/orders", json=_open_order())
+    before = client.get("/api/fund/performance").json()
+
+    def boom(sym):
+        raise RuntimeError("sin red")
+
+    monkeypatch.setattr(fmod, "get_price", boom)
+    r = client.post("/api/fund/mark")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["marked"] == 0 and d["failed"] == ["BTC"]
+    after = client.get("/api/fund/performance").json()
+    assert len(after["curve"]) == len(before["curve"])
+
+
+def test_risk_review_uses_instruct_model(monkeypatch):
+    import asyncio
+    import agents.ai_brain as ab
+    captured = {}
+
+    async def fake_ask(prompt, **kw):
+        captured.update(kw)
+        return "APRUEBA: ok"
+
+    monkeypatch.setattr(ab, "ask_nvidia", fake_ask)
+    res = asyncio.run(ab.risk_review({"symbol": "BTC"}))
+    assert res["decision"] == "aprueba"
+    assert captured.get("model") == "google/gemma-4-31b-it"
+    assert captured.get("max_tokens", 0) >= 300
+
+
+def test_chat_agent_models_are_instruct():
+    import agents.ai_brain as ab
+    assert ab.AGENT_MODELS["scout"] == "google/gemma-4-31b-it"
+    assert ab.AGENT_MODELS["social"] == "google/gemma-4-31b-it"
