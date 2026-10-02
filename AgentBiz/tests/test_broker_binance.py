@@ -189,3 +189,107 @@ def test_round_step_and_load_step(monkeypatch):
     bb._STEP_CACHE.clear()
     assert bb._load_step("BTCUSDT", "spot") == 0.00001
     assert bb._load_step("BTCUSDT", "spot") == 0.00001
+
+
+def test_close_futures_already_flat_is_noop(monkeypatch):
+    _env_testnet(monkeypatch)
+    calls = []
+
+    def fake(method, path, params, market_type, signed=True):
+        calls.append(path)
+        if path == "/fapi/v1/positionRisk":
+            return {"symbol": "BTCUSDT", "amt": "0"}
+        return {}
+
+    monkeypatch.setattr(bb, "_request", fake)
+    out = bb.close_on_exchange("BTC", "futures", "long", 100.0, 2.0, 100.0)
+    assert out["closed"] is False
+    assert calls == ["/fapi/v1/positionRisk"]
+
+
+def test_close_futures_cancels_protection_and_closes(monkeypatch):
+    _env_testnet(monkeypatch)
+    monkeypatch.setattr(bb, "_load_step", lambda *a: 0.001)
+    calls = []
+
+    def fake(method, path, params, market_type, signed=True):
+        calls.append({"method": method, "path": path, "params": params})
+        if path == "/fapi/v1/positionRisk":
+            return {"symbol": "BTCUSDT", "amt": "-0.25"}
+        if path == "/fapi/v1/openOrders":
+            return [{"orderId": 5}, {"orderId": 6}]
+        if params.get("type") == "MARKET":
+            return {"orderId": 77, "avgPrice": "101.0", "executedQty": "0.25"}
+        return {}
+
+    monkeypatch.setattr(bb, "_request", fake)
+    out = bb.close_on_exchange("BTC", "futures", "long", 100.0, 2.0, 100.0)
+    assert out["closed"] is True
+    assert out["fill_price"] == 101.0
+    methods = [(c["method"], c["path"]) for c in calls]
+    assert methods[:3] == [("GET", "/fapi/v1/positionRisk"),
+                           ("GET", "/fapi/v1/openOrders"),
+                           ("DELETE", "/fapi/v1/order")]
+    last = calls[-1]
+    assert last["path"] == "/fapi/v1/order"
+    assert last["params"]["side"] == "BUY"
+    assert last["params"]["reduceOnly"] == "true"
+
+
+def test_close_spot_without_balance_is_noop(monkeypatch):
+    _env_testnet(monkeypatch)
+
+    def fake(method, path, params, market_type, signed=True):
+        if path == "/api/v3/account":
+            return {"balances": [{"asset": "BTC", "free": "0.0", "locked": "0.0"}]}
+        raise AssertionError(f"path inesperado {path}")
+
+    monkeypatch.setattr(bb, "_request", fake)
+    out = bb.close_on_exchange("BTC", "spot", "long", 100.0, 1.0, 100.0)
+    assert out == {"closed": False, "fill_price": None, "reason": "sin saldo spot"}
+
+
+def test_close_spot_sells_free_balance(monkeypatch):
+    _env_testnet(monkeypatch)
+    monkeypatch.setattr(bb, "_load_step", lambda *a: 0.0001)
+    calls = []
+
+    def fake(method, path, params, market_type, signed=True):
+        calls.append({"path": path, "params": params})
+        if path == "/api/v3/account":
+            return {"balances": [{"asset": "ETH", "free": "0.5", "locked": "0"}]}
+        if params.get("type") == "MARKET":
+            return {"orderId": 3, "fills": [{"price": "2000.0", "qty": "0.05"}]}
+        return {}
+
+    monkeypatch.setattr(bb, "_request", fake)
+    out = bb.close_on_exchange("ETH", "spot", "long", 100.0, 1.0, 2000.0)
+    assert out["closed"] is True and out["fill_price"] == 2000.0
+    sell = [c for c in calls if c["path"] == "/api/v3/order"][0]
+    assert sell["params"]["side"] == "SELL"
+    assert sell["params"]["quantity"] == 0.05
+
+
+def test_close_sync_falls_back_to_spot(monkeypatch):
+    _env_testnet(monkeypatch)
+    seen = []
+
+    def fake_close(symbol, market_type, side, qty_usd, leverage, entry):
+        seen.append(market_type)
+        if market_type == "futures":
+            return {"closed": False, "fill_price": None,
+                    "reason": "ya flat en el exchange"}
+        return {"closed": True, "fill_price": 2000.0, "reason": "broker close"}
+
+    monkeypatch.setattr(bb, "close_on_exchange", fake_close)
+    out = bb.close_sync("ETH", "long", 100.0, 1.0, 2000.0)
+    assert seen == ["futures", "spot"]
+    assert out["closed"] is True
+    assert out["market_type"] == "spot"
+
+
+def test_close_sync_in_paper_returns_noop(monkeypatch):
+    monkeypatch.delenv("EXECUTION_MODE", raising=False)
+    out = bb.close_sync("BTC", "long", 100.0, 1.0, 100.0)
+    assert out["closed"] is False
+    assert out["reason"] == "paper"

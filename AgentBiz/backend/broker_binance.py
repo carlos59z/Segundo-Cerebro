@@ -188,3 +188,61 @@ def place_order(symbol, side, qty_usd, leverage, market_type, ref_price,
             protection_ok = False
     return {"order_id": str(js.get("orderId")),
             "fill_price": _avg_futures(js, bsym), "protection_ok": protection_ok}
+
+
+def close_on_exchange(symbol, market_type, side, qty_usd, leverage, entry):
+    mode = execution_mode()
+    if mode == "paper":
+        raise BrokerError("close_on_exchange no aplica en modo paper")
+    bsym = to_binance_symbol(symbol, market_type)
+    if market_type == "futures":
+        js = _request("GET", "/fapi/v1/positionRisk", {"symbol": bsym}, market_type)
+        amt = float(js.get("amt") or 0)
+        if abs(amt) < 1e-12:
+            return {"closed": False, "fill_price": None,
+                    "reason": "ya flat en el exchange"}
+        for o in _request("GET", "/fapi/v1/openOrders", {"symbol": bsym},
+                          market_type) or []:
+            _request("DELETE", "/fapi/v1/order",
+                     {"symbol": bsym, "orderId": o["orderId"]}, market_type)
+        qty = _round_step(abs(amt), _load_step(bsym, market_type))
+        js = _request("POST", "/fapi/v1/order", {
+            "symbol": bsym, "side": "SELL" if amt > 0 else "BUY",
+            "type": "MARKET", "quantity": qty, "reduceOnly": "true"}, market_type)
+        return {"closed": True, "fill_price": _avg_futures(js, bsym),
+                "reason": "broker close"}
+    base = bsym[:-4]
+    acct = _request("GET", "/api/v3/account", {}, market_type)
+    free = 0.0
+    for b in acct.get("balances", []):
+        if b.get("asset") == base:
+            free = float(b.get("free") or 0)
+            break
+    if free <= 0:
+        return {"closed": False, "fill_price": None, "reason": "sin saldo spot"}
+    qty = _round_step(min(free, qty_usd * leverage / entry),
+                      _load_step(bsym, market_type))
+    if qty <= 0:
+        return {"closed": False, "fill_price": None, "reason": "cantidad <= step"}
+    js = _request("POST", "/api/v3/order", {
+        "symbol": bsym, "side": "SELL", "type": "MARKET", "quantity": qty},
+        market_type)
+    return {"closed": True, "fill_price": _avg_spot(js, bsym),
+            "reason": "broker close"}
+
+
+def close_sync(symbol, side, qty_usd, leverage, entry):
+    mode = execution_mode()
+    if mode == "paper":
+        return {"closed": False, "fill_price": None, "reason": "paper",
+                "market_type": None}
+    try:
+        r = close_on_exchange(symbol, "futures", side, qty_usd, leverage, entry)
+        if r["closed"]:
+            r["market_type"] = "futures"
+            return r
+    except BrokerOrderInvalid:
+        pass
+    r = close_on_exchange(symbol, "spot", side, qty_usd, leverage, entry)
+    r["market_type"] = "spot"
+    return r
