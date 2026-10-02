@@ -122,6 +122,12 @@ async def fund_orders(req: OrderRequest):
         order_id = None
         if mode != "paper":
             try:
+                await asyncio.to_thread(
+                    lambda: _pf().preflight_open(
+                        req.qty_usd, req.leverage, req.entry, req.stop_loss))
+            except RiskError as e:
+                raise HTTPException(status_code=409, detail=str(e))
+            try:
                 fill = await asyncio.to_thread(
                     place_order, req.symbol, req.side, req.qty_usd, req.leverage,
                     req.market_type, req.entry, req.stop_loss, req.take_profit)
@@ -135,6 +141,15 @@ async def fund_orders(req: OrderRequest):
                     req.symbol, req.side, req.qty_usd, req.leverage,
                     req.entry, req.stop_loss, req.take_profit, req.strategy))
         except RiskError as e:
+            if mode != "paper":
+                try:
+                    bres = await asyncio.to_thread(
+                        close_on_exchange, req.symbol, req.market_type,
+                        req.side, req.qty_usd, req.leverage, req.entry)
+                    send_telegram(f"orden {req.symbol} rechazada post-fill; "
+                                  f"compensacion: {bres}")
+                except BrokerError as ce:
+                    send_telegram(f"CRITICO: fill huerfano {req.symbol}: {ce}")
             raise HTTPException(status_code=409, detail=str(e))
         await asyncio.to_thread(lambda: _pf().record_equity())
         try:
@@ -161,8 +176,8 @@ async def fund_orders(req: OrderRequest):
                                 detail=f"posicion {req.position_id} no abierta")
         try:
             bres = await asyncio.to_thread(
-                close_on_exchange, row["symbol"], req.market_type, row["side"],
-                row["qty_usd"], row["leverage"], row["entry"])
+                close_sync, row["symbol"], row["side"], row["qty_usd"],
+                row["leverage"], row["entry"])
         except BrokerError as e:
             raise HTTPException(status_code=502, detail=f"broker: {e}")
         if bres.get("fill_price"):
@@ -176,7 +191,7 @@ async def fund_orders(req: OrderRequest):
     try:
         await asyncio.to_thread(
             _log_order, f"Cerrar {req.symbol or trade['symbol']}",
-            f"posicion {req.position_id} a {req.price} ({req.reason})")
+            f"posicion {req.position_id} a {exit_price} ({req.reason})")
     except Exception:
         pass
     return {"trade": trade, "risk_review": None,
@@ -216,7 +231,7 @@ async def fund_mark():
                 try:
                     close_sync(c["symbol"], c["side"], c["qty_usd"],
                                c["leverage"], c["entry"])
-                except BrokerError as e:
+                except Exception as e:
                     sync_failed.append(c["symbol"])
                     send_telegram(f"mark: sync broker fallo {c['symbol']}: {e}")
         st = p.get_status()

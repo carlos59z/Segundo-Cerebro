@@ -66,3 +66,21 @@ def test_mark_paper_mode_skips_sync(client, monkeypatch):
     r = client.post("/api/fund/mark")
     assert r.status_code == 200
     assert r.json()["broker_sync_failed"] == []
+
+
+def test_mark_sync_non_broker_exception_still_reports(client, monkeypatch):
+    import api.fund as fmod
+    _open(client)
+    monkeypatch.setattr(fmod, "execution_mode", lambda: "testnet")
+
+    def weird(*a, **k):
+        raise ValueError("json corrupto")
+
+    monkeypatch.setattr(fmod, "close_sync", weird)
+    monkeypatch.setattr(fmod, "get_price", lambda s: 94.0)
+    msgs = []
+    monkeypatch.setattr(fmod, "send_telegram", msgs.append)
+    r = client.post("/api/fund/mark")
+    assert r.status_code == 200
+    assert r.json()["broker_sync_failed"] == ["BTC"]
+    assert msgs

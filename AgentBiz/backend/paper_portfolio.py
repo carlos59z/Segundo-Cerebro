@@ -184,7 +184,8 @@ class Portfolio:
             return False, "stop de perdida diaria activo"
         return True, "ok"
 
-    def open_position(self, symbol, side, qty_usd, leverage, entry, stop_loss, take_profit, strategy):
+    def preflight_open(self, qty_usd, leverage, entry, stop_loss):
+        """Mismos checks de open_position sin insertar (validar antes del broker)."""
         risk_pct = abs(entry - stop_loss) / entry * leverage
         ok, why = self.can_open(risk_pct)
         if not ok:
@@ -193,6 +194,9 @@ class Portfolio:
             raise RiskError(f"apalancamiento {leverage}x excede max {PHASES[self.phase]['max_leverage']}x")
         if qty_usd * leverage > self.get_status()["equity"]:
             raise RiskError("margen total excede equity")
+
+    def open_position(self, symbol, side, qty_usd, leverage, entry, stop_loss, take_profit, strategy):
+        self.preflight_open(qty_usd, leverage, entry, stop_loss)
         c = self._conn()
         try:
             cur = c.execute(

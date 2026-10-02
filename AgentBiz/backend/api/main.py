@@ -2,6 +2,9 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+from dotenv import load_dotenv
+load_dotenv()  # .env del raiz del repo; no pisa variables ya presentes
+
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -54,10 +57,14 @@ class EarningRequest(BaseModel):
     description: str = ""
 
 from auto_trader import start_auto_trader
+from broker_binance import execution_mode, load_keys, BrokerError
 
 
 @app.on_event("startup")
 async def startup():
+    mode = execution_mode()  # EXECUTION_MODE invalido -> aborta arranque
+    if mode != "paper":
+        load_keys(mode)  # testnet/real sin keys -> fail-fast (spec §6)
     init_db()
     start_auto_trader()
 

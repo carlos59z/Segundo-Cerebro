@@ -14,6 +14,7 @@ from paper_portfolio import PHASES, Portfolio
 
 log = logging.getLogger("auto_trader")
 COOLDOWN = {}
+_LOOP_TASK = None
 
 
 def market_type():
@@ -115,7 +116,8 @@ async def tick():
     summary = {"marked": 0, "ordered": 0, "skipped": 0, "skip_reason": None}
     try:
         m = await fmod.fund_mark()
-        summary["marked"] = m.get("closed", 0)
+        closed = m.get("closed", 0)
+        summary["marked"] = len(closed) if isinstance(closed, list) else closed
     except Exception as e:
         log.warning("mark fallo: %s", e)
     p = Portfolio(fmod.FUND_DB)
@@ -129,7 +131,9 @@ async def tick():
     open_symbols = {x["symbol"] for x in p.get_positions("open")}
     results = research.latest_results(fmod.FUND_DB, 20)
     cands = select_candidates(results, open_symbols, COOLDOWN, time.time())
-    for c in cands[:1]:
+    for c in cands:
+        if summary["ordered"] >= 1:
+            break
         op = await asyncio.to_thread(get_operation, c["symbol"])
         body = operation_to_order(op, c["symbol"], p.phase, market_type(),
                                   st["equity"])
@@ -143,6 +147,7 @@ async def tick():
             detail = getattr(e, "detail", str(e))
             send_telegram(f"auto-trader X {body['symbol']}: {detail}")
             summary["skipped"] += 1
+            COOLDOWN[body["symbol"]] = time.time()
             continue
         COOLDOWN[body["symbol"]] = time.time()
         send_telegram(
@@ -176,7 +181,8 @@ async def run_loop():
 
 
 def start_auto_trader():
+    global _LOOP_TASK
     if os.getenv("AUTO_TRADER") != "1":
         return False
-    asyncio.create_task(run_loop())
+    _LOOP_TASK = asyncio.create_task(run_loop())
     return True

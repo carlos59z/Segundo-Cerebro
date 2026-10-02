@@ -85,7 +85,7 @@ def _wire_tick(monkeypatch, client, results=None, op=None):
     import api.fund as fmod
 
     async def fake_mark():
-        return {"closed": 0}
+        return {"closed": [{}]}
 
     monkeypatch.setattr(fmod, "fund_mark", fake_mark)
     monkeypatch.setattr(at.research, "latest_results",
@@ -112,6 +112,7 @@ def test_tick_happy_path_passes_risk_review(client, monkeypatch):
     monkeypatch.setattr(fmod, "fund_orders", fake_orders)
     summary = asyncio.run(at.tick())
     assert summary["ordered"] == 1
+    assert summary["marked"] == 1
     assert captured["req"].review is True
     assert captured["req"].entry == 100.0
     assert captured["req"].stop_loss == 92.5
@@ -205,3 +206,35 @@ def test_start_autotrader_env_switch(monkeypatch):
         return started
 
     assert asyncio.run(main()) is True
+
+
+def test_tick_tries_next_candidate_after_hold(client, monkeypatch):
+    import api.fund as fmod
+    _wire_tick(monkeypatch, client, results=[
+        {"symbol": "BTC", "market": "crypto", "strategy": "sma",
+         "eligible": True, "sharpe": 1},
+        {"symbol": "ETH", "market": "crypto", "strategy": "sma",
+         "eligible": True, "sharpe": 1}])
+    monkeypatch.setattr(at, "get_operation",
+                        lambda s, interval="1h": None if s == "BTC" else _op())
+    captured = {}
+
+    async def fake_orders(req):
+        captured["req"] = req
+        return {"position": {"id": 1}}
+
+    monkeypatch.setattr(fmod, "fund_orders", fake_orders)
+    summary = asyncio.run(at.tick())
+    assert summary["ordered"] == 1
+    assert captured["req"].symbol == "ETH"
+
+
+def test_startup_fail_fast_requires_keys(monkeypatch):
+    import pytest
+    from broker_binance import BrokerError
+    import api.main as main_mod
+    monkeypatch.setenv("EXECUTION_MODE", "testnet")
+    monkeypatch.delenv("BINANCE_TESTNET_KEY", raising=False)
+    monkeypatch.delenv("BINANCE_TESTNET_SECRET", raising=False)
+    with pytest.raises(BrokerError):
+        asyncio.run(main_mod.startup())

@@ -79,7 +79,7 @@ def test_close_testnet_records_broker_fill(client, monkeypatch):
                                          "protection_ok": True})
     client.post("/api/fund/orders", json=_open(market_type="futures"))
     monkeypatch.setattr(
-        fmod, "close_on_exchange",
+        fmod, "close_sync",
         lambda *a: {"closed": True, "fill_price": 105.0, "reason": "x"})
     r = client.post("/api/fund/orders",
                     json={"action": "close", "position_id": 1, "price": 104.0,
@@ -87,3 +87,38 @@ def test_close_testnet_records_broker_fill(client, monkeypatch):
     assert r.status_code == 200
     assert r.json()["trade"]["pnl"] == 30.0
     assert r.json()["execution"]["mode"] == "testnet"
+
+
+def test_testnet_preflight_blocks_before_broker(client, monkeypatch):
+    import api.fund as fmod
+    monkeypatch.setattr(fmod, "execution_mode", lambda: "testnet")
+    calls = []
+    monkeypatch.setattr(fmod, "place_order", lambda *a, **k: calls.append(1))
+    r = client.post("/api/fund/orders",
+                    json=_open(market_type="futures", qty_usd=3000.0))
+    assert r.status_code == 409
+    assert calls == []
+    pf = client.get("/api/fund/portfolio").json()
+    assert pf["positions"] == []
+
+
+def test_post_fill_risk_error_compensates(client, monkeypatch):
+    import api.fund as fmod
+    monkeypatch.setattr(fmod, "execution_mode", lambda: "testnet")
+    monkeypatch.setattr(fmod, "place_order",
+                        lambda *a, **k: {"order_id": "9", "fill_price": 95.0,
+                                         "protection_ok": True})
+    closes = []
+    monkeypatch.setattr(
+        fmod, "close_on_exchange",
+        lambda *a: (closes.append(a) or
+                    {"closed": True, "fill_price": 95.0, "reason": "broker close"}))
+    msgs = []
+    monkeypatch.setattr(fmod, "send_telegram", msgs.append)
+    r = client.post("/api/fund/orders",
+                    json=_open(leverage=1.0, stop_loss=90.5))
+    assert r.status_code == 409
+    assert closes and closes[0][0] == "BTC"
+    assert msgs and "post-fill" in msgs[0]
+    pf = client.get("/api/fund/portfolio").json()
+    assert pf["positions"] == []
