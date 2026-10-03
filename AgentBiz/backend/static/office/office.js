@@ -371,7 +371,7 @@ function makeBubble(text) {
   wrapText(ctx, clipped, 320, 80, 560, 46, 5);
   const tex = new THREE.CanvasTexture(c);
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
-  sp.scale.set(4.4, 2.2, 1);
+  sp.scale.set(3.7, 1.85, 1);
   return sp;
 }
 
@@ -384,7 +384,7 @@ function updateBubbles(now) {
     if (bubble) { scene.remove(bubble); bubble = null; }
     bubble = makeBubble(newest.content);
     const d = desks[newest.from_agent];
-    bubble.position.set(d.group.position.x, 3.9, d.group.position.z);
+    bubble.position.set(d.group.position.x, 3.5, d.group.position.z + 1.7);
     scene.add(bubble);
     bubbleUntil = now + 6000;
   }
