@@ -1,5 +1,6 @@
 import os
 import asyncio
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Literal, Optional
@@ -287,27 +288,51 @@ async def fund_research(req: ResearchRequest):
 
 _OFFICE_TICKERS = ("BTC", "ETH", "DIA", "TSLA", "USDJPY")
 _OFFICE_TICKER_TTL = 60.0
-_office_ticker_cache = {}  # sym -> (fn_get_price, price, ts_monotonic, refreshing)
+_OFFICE_TICKER_FAIL_TTL = 30.0
+_office_ticker_cache = {}  # sym -> (fn_get_price, price, ts_monotonic, fail_ts)
+_office_ticker_locks = {}
+_office_ticker_locks_guard = threading.Lock()
+_office_now = time.monotonic
+
+
+def _office_lock(sym):
+    with _office_ticker_locks_guard:
+        return _office_ticker_locks.setdefault(sym, threading.Lock())
 
 
 def _office_price(sym):
-    now = time.monotonic()
+    now = _office_now()
     fn = get_price
+    price, ts, fail = None, 0.0, 0.0
     entry = _office_ticker_cache.get(sym)
     if entry and entry[0] is fn:
-        _, price, ts, refreshing = entry
+        _, price, ts, fail = entry
         if now - ts < _OFFICE_TICKER_TTL:
             return price
-        if refreshing:
+        if fail and now - fail < _OFFICE_TICKER_FAIL_TTL:
+            if price is not None:
+                return price
+            raise RuntimeError("ticker en backoff por fallo: " + sym)
+    lock = _office_lock(sym)
+    if not lock.acquire(blocking=False):
+        if price is not None:
             return price
-        _office_ticker_cache[sym] = (fn, price, ts, True)
+        raise RuntimeError("refresh de ticker ya en vuelo: " + sym)
     try:
-        price = fn(sym)
-    except Exception:
-        _office_ticker_cache.pop(sym, None)
-        raise
-    _office_ticker_cache[sym] = (fn, price, time.monotonic(), False)
-    return price
+        entry = _office_ticker_cache.get(sym)
+        if entry and entry[0] is fn and _office_now() - entry[2] < _OFFICE_TICKER_TTL:
+            return entry[1]
+        try:
+            new_price = fn(sym)
+        except Exception:
+            _office_ticker_cache[sym] = (fn, price, ts, _office_now())
+            if price is not None:
+                return price
+            raise
+        _office_ticker_cache[sym] = (fn, new_price, _office_now(), 0.0)
+        return new_price
+    finally:
+        lock.release()
 
 
 @router.get("/office")

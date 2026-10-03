@@ -132,3 +132,122 @@ def test_office_ticker_is_cached_for_60s(client, monkeypatch):
     assert r2.json()["tickers"]["BTC"] == 42.0
     assert len(calls) == n_after_first, (
         "segunda llamada no uso cache: %d llamadas extra" % (len(calls) - n_after_first))
+
+
+def test_office_ticker_expires_after_ttl(client, monkeypatch):
+    import api.fund as fmod
+    _init_agents()
+    calls = []
+    def counting(sym):
+        calls.append(sym)
+        return 40.0 + len(calls)
+    monkeypatch.setattr(fmod, "get_price", counting)
+    now = [1000.0]
+    monkeypatch.setattr(fmod, "_office_now", lambda: now[0])
+    r1 = client.get("/api/fund/office")
+    assert r1.json()["tickers"]["BTC"] == 41.0
+    assert len(calls) == 5
+    r2 = client.get("/api/fund/office")
+    assert r2.json()["tickers"]["BTC"] == 41.0
+    assert len(calls) == 5, "dentro del TTL no debe refetchar"
+    now[0] += fmod._OFFICE_TICKER_TTL + 1
+    r3 = client.get("/api/fund/office")
+    assert r3.json()["tickers"]["BTC"] == 46.0, "tras el TTL debe refetchar"
+    assert len(calls) == 10
+
+
+def test_office_ticker_serves_stale_when_refresh_in_flight(client, monkeypatch):
+    import api.fund as fmod
+    _init_agents()
+    calls = []
+    def counting(sym):
+        calls.append(sym)
+        return 42.0
+    monkeypatch.setattr(fmod, "get_price", counting)
+    now = [1000.0]
+    monkeypatch.setattr(fmod, "_office_now", lambda: now[0])
+    assert client.get("/api/fund/office").json()["tickers"]["BTC"] == 42.0
+    assert len(calls) == 5
+    now[0] += fmod._OFFICE_TICKER_TTL + 1
+    lock = fmod._office_lock("BTC")
+    lock.acquire()
+    try:
+        r = client.get("/api/fund/office")
+        assert r.json()["tickers"]["BTC"] == 42.0, (
+            "con refresh en vuelo debe servir el precio viejo, no null")
+        assert calls.count("BTC") == 1, (
+            "no debe refetchar BTC mientras otro hilo tiene el lock")
+    finally:
+        lock.release()
+    r2 = client.get("/api/fund/office")
+    assert calls.count("BTC") == 2, "al liberarse el lock debe refetchar BTC"
+
+
+def test_office_ticker_null_when_cold_miss_already_in_flight(client, monkeypatch):
+    import api.fund as fmod
+    _init_agents()
+    def counting(sym):
+        return 42.0
+    monkeypatch.setattr(fmod, "get_price", counting)
+    now = [1000.0]
+    monkeypatch.setattr(fmod, "_office_now", lambda: now[0])
+    lock = fmod._office_lock("BTC")
+    lock.acquire()
+    try:
+        r = client.get("/api/fund/office")
+        assert r.status_code == 200
+        assert r.json()["tickers"]["BTC"] is None, (
+            "sin cache y con refresh en vuelo debe devolver null, no bloquear")
+    finally:
+        lock.release()
+
+
+def test_office_ticker_failure_uses_backoff(client, monkeypatch):
+    import api.fund as fmod
+    _init_agents()
+    calls = []
+    def boom(sym):
+        calls.append(sym)
+        raise RuntimeError("yfinance caido")
+    monkeypatch.setattr(fmod, "get_price", boom)
+    now = [1000.0]
+    monkeypatch.setattr(fmod, "_office_now", lambda: now[0])
+    r1 = client.get("/api/fund/office")
+    assert r1.status_code == 200
+    assert r1.json()["tickers"]["BTC"] is None
+    assert len(calls) == 5, "primer intento por simbolo"
+    r2 = client.get("/api/fund/office")
+    assert r2.json()["tickers"]["BTC"] is None
+    assert len(calls) == 5, "dentro del backoff no debe reintentar"
+    now[0] += fmod._OFFICE_TICKER_FAIL_TTL + 1
+    r3 = client.get("/api/fund/office")
+    assert len(calls) == 10, "tras el backoff debe reintentar"
+
+
+def test_office_ticker_serves_stale_on_failure(client, monkeypatch):
+    import api.fund as fmod
+    _init_agents()
+    state = {"fail": False}
+    def flaky(sym):
+        if state["fail"]:
+            raise RuntimeError("temporal")
+        return 77.0
+    monkeypatch.setattr(fmod, "get_price", flaky)
+    now = [1000.0]
+    monkeypatch.setattr(fmod, "_office_now", lambda: now[0])
+    r1 = client.get("/api/fund/office")
+    assert r1.json()["tickers"]["BTC"] == 77.0
+    now[0] += fmod._OFFICE_TICKER_TTL + 1
+    state["fail"] = True
+    r2 = client.get("/api/fund/office")
+    assert r2.json()["tickers"]["BTC"] == 77.0, (
+        "si el refresh falla pero hay precio viejo, servirlo")
+
+
+def test_office_html_references_only_local_assets(client):
+    r = client.get("/office")
+    assert r.status_code == 200
+    html = r.text
+    assert "/static/lib/three.min.js" in html
+    assert "https://" not in html, "CDN externo prohibido (spec §4)"
+    assert "http://" not in html, "CDN externo prohibido (spec §4)"

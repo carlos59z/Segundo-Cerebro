@@ -247,7 +247,7 @@ function applyState() {
   for (const a of state.agents) {
     const d = desks[a.id];
     if (!d) continue;
-    const working = a.status === "working";
+    const working = a.status === "working" || localWorking.has(a.id);
     d.working = working;
     d.light.color.setHex(working ? 0xfbbf24 : 0x38bdf8);
     d.light.intensity = working ? 1.8 : 0.5;
@@ -261,15 +261,26 @@ function applyState() {
   updateLine(Date.now());
 }
 
+const localWorking = new Set();
+let pollInFlight = false;
+
 async function poll() {
+  if (pollInFlight) return;
+  pollInFlight = true;
   try {
     const r = await fetch("/api/fund/office");
     if (!r.ok) throw new Error("HTTP " + r.status);
     state = await r.json();
     document.getElementById("offline").classList.add("hidden");
-    applyState();
   } catch (e) {
     document.getElementById("offline").classList.remove("hidden");
+  } finally {
+    pollInFlight = false;
+  }
+  try {
+    applyState();
+  } catch (e) {
+    console.error("render error en applyState:", e);
   }
 }
 setInterval(poll, 3000);
@@ -315,9 +326,15 @@ function renderFeed() {
   for (const m of state.messages) {
     const li = document.createElement("li");
     const time = String(m.created_at || "").slice(11, 16);
-    li.innerHTML = '<span class="time">' + time + "</span>" +
-      '<span class="who">' + feedName(m.from_agent) + " → " +
-      feedName(m.to_agent) + "</span><br>";
+    const when = document.createElement("span");
+    when.className = "time";
+    when.textContent = time;
+    const who = document.createElement("span");
+    who.className = "who";
+    who.textContent = feedName(m.from_agent) + " → " + feedName(m.to_agent);
+    li.appendChild(when);
+    li.appendChild(who);
+    li.appendChild(document.createElement("br"));
     li.appendChild(document.createTextNode(
       String(m.content || "").slice(0, 140)));
     ul.appendChild(li);
@@ -458,6 +475,7 @@ function openChat(id) {
     meta.emoji + " " + meta.name + " — " + meta.role;
   chatLog.innerHTML = "";
   chatStatus.textContent = "";
+  chatStatus.className = "";
   if (state) {
     const hist = state.messages
       .filter(m => m.from_agent === id || m.to_agent === id)
@@ -479,27 +497,46 @@ document.getElementById("chat-close").addEventListener("click", () => {
 });
 
 async function sendChat(query) {
+  const target = currentChat;
   chatSend.disabled = true;
+  chatStatus.className = "busy";
   chatStatus.style.color = "#7dd3fc";
   chatStatus.textContent = "Pensando… (hasta 60 s)";
   chatBubbleRow("mine", "Tú: " + query);
+  localWorking.add(target);
   try {
-    const r = await fetch("/api/chat/" + currentChat, {
+    applyState();
+  } catch (e) { /* render local del estado working */ }
+  try {
+    const r = await fetch("/api/chat/" + target, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: query }),
     });
     if (!r.ok) throw new Error("HTTP " + r.status);
     const d = await r.json();
-    chatBubbleRow("theirs", AGENT_META[currentChat].name + ": " + d.response);
-    chatStatus.textContent = "";
+    if (currentChat === target) {
+      chatBubbleRow("theirs", AGENT_META[target].name + ": " + d.response);
+      chatStatus.textContent = "";
+    }
   } catch (e) {
-    chatStatus.style.color = "#f87171";
-    chatStatus.textContent = "No se pudo enviar: " + e.message;
+    if (currentChat === target) {
+      chatStatus.style.color = "#f87171";
+      chatStatus.textContent = "No se pudo enviar: " + e.message;
+    }
   } finally {
-    chatSend.disabled = false;
-    chatInput.value = "";
-    chatInput.focus();
+    localWorking.delete(target);
+    try {
+      applyState();
+    } catch (e) { /* render local */ }
+    if (currentChat === target) {
+      chatStatus.className = "";
+      chatSend.disabled = false;
+      chatInput.value = "";
+      chatInput.focus();
+    } else {
+      chatSend.disabled = false;
+    }
   }
 }
 
