@@ -320,6 +320,8 @@ async def chat(agent_id: str, req: AgentQuery):
         result = f"Error: {str(e)}"
 
     db.execute("UPDATE agents SET status = 'idle', tasks_completed = tasks_completed + 1 WHERE id = ?", (agent_id,))
+    db.execute("INSERT INTO messages (from_agent, to_agent, content, message_type) VALUES (?, 'user', ?, 'chat')",
+               (agent_id, result))
     db.execute("INSERT INTO tasks (agent_id, title, description, status, result) VALUES (?, ?, ?, 'completed', ?)",
                (agent_id, req.query[:100], req.query, result))
     db.commit()

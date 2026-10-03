@@ -92,3 +92,26 @@ def test_static_and_office_page(client):
     assert r2.status_code == 200
     r3 = client.get("/api/fund/status")
     assert r3.status_code == 200
+
+
+def test_chat_saves_response_into_messages(client, monkeypatch):
+    import api.main as main_mod
+    from memory.database import init_db, get_db
+    init_db()
+
+    async def fake_chat(agent_id, message):
+        return "respuesta del agente"
+
+    monkeypatch.setattr(main_mod, "chat_with_agent", fake_chat)
+    r = client.post("/api/chat/trading", json={"query": "hola"})
+    assert r.status_code == 200
+    assert r.json()["response"] == "respuesta del agente"
+    db = get_db()
+    row = db.execute(
+        "SELECT * FROM messages WHERE message_type='chat' "
+        "ORDER BY id DESC LIMIT 1").fetchone()
+    db.close()
+    assert row is not None
+    assert row["from_agent"] == "trading"
+    assert row["to_agent"] == "user"
+    assert row["content"] == "respuesta del agente"
