@@ -207,8 +207,65 @@ window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+const clock = new THREE.Clock();
+
 function animate() {
   requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+  let i = 0;
+  for (const id of AGENT_IDS) {
+    const d = desks[id];
+    if (d.working) {
+      d.avatar.position.y = 1.05 + Math.sin(t * 6 + i) * 0.13;
+    } else {
+      d.avatar.position.y = 1.05;
+    }
+    i++;
+  }
   renderer.render(scene, camera);
 }
 animate();
+
+
+let state = null;
+
+function drawMonitor(id, text, working) {
+  const d = desks[id];
+  if (!d) return;
+  const ctx = d.monitorCtx;
+  ctx.fillStyle = working ? "#451a03" : "#082f49";
+  ctx.fillRect(0, 0, 512, 256);
+  ctx.fillStyle = working ? "#fbbf24" : "#7dd3fc";
+  ctx.font = "bold 34px Segoe UI";
+  ctx.textAlign = "center";
+  wrapText(ctx, text || "—", 256, 70, 460, 44, 4);
+  d.monitorTex.needsUpdate = true;
+}
+
+function applyState() {
+  if (!state) return;
+  for (const a of state.agents) {
+    const d = desks[a.id];
+    if (!d) continue;
+    const working = a.status === "working";
+    d.working = working;
+    d.light.color.setHex(working ? 0xfbbf24 : 0x38bdf8);
+    d.light.intensity = working ? 1.8 : 0.5;
+    const taskText = a.task && a.task.title ? a.task.title : "en espera";
+    drawMonitor(a.id, taskText, working);
+  }
+}
+
+async function poll() {
+  try {
+    const r = await fetch("/api/fund/office");
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    state = await r.json();
+    document.getElementById("offline").classList.add("hidden");
+    applyState();
+  } catch (e) {
+    document.getElementById("offline").classList.remove("hidden");
+  }
+}
+setInterval(poll, 3000);
+poll();
