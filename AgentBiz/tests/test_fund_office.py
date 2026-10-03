@@ -115,3 +115,20 @@ def test_chat_saves_response_into_messages(client, monkeypatch):
     assert row["from_agent"] == "trading"
     assert row["to_agent"] == "user"
     assert row["content"] == "respuesta del agente"
+
+
+def test_office_ticker_is_cached_for_60s(client, monkeypatch):
+    import api.fund as fmod
+    _init_agents()
+    calls = []
+    def counting(sym):
+        calls.append(sym)
+        return 42.0
+    monkeypatch.setattr(fmod, "get_price", counting)
+    r1 = client.get("/api/fund/office")
+    assert r1.json()["tickers"]["BTC"] == 42.0
+    n_after_first = len(calls)
+    r2 = client.get("/api/fund/office")
+    assert r2.json()["tickers"]["BTC"] == 42.0
+    assert len(calls) == n_after_first, (
+        "segunda llamada no uso cache: %d llamadas extra" % (len(calls) - n_after_first))

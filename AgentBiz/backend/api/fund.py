@@ -1,5 +1,6 @@
 import os
 import asyncio
+import time
 from datetime import datetime, timezone
 from typing import Literal, Optional
 from fastapi import APIRouter, HTTPException
@@ -285,6 +286,28 @@ async def fund_research(req: ResearchRequest):
 
 
 _OFFICE_TICKERS = ("BTC", "ETH", "DIA", "TSLA", "USDJPY")
+_OFFICE_TICKER_TTL = 60.0
+_office_ticker_cache = {}  # sym -> (fn_get_price, price, ts_monotonic, refreshing)
+
+
+def _office_price(sym):
+    now = time.monotonic()
+    fn = get_price
+    entry = _office_ticker_cache.get(sym)
+    if entry and entry[0] is fn:
+        _, price, ts, refreshing = entry
+        if now - ts < _OFFICE_TICKER_TTL:
+            return price
+        if refreshing:
+            return price
+        _office_ticker_cache[sym] = (fn, price, ts, True)
+    try:
+        price = fn(sym)
+    except Exception:
+        _office_ticker_cache.pop(sym, None)
+        raise
+    _office_ticker_cache[sym] = (fn, price, time.monotonic(), False)
+    return price
 
 
 @router.get("/office")
@@ -315,7 +338,7 @@ async def fund_office():
         tickers = {}
         for sym in _OFFICE_TICKERS:
             try:
-                tickers[sym] = get_price(sym)
+                tickers[sym] = _office_price(sym)
             except Exception:
                 tickers[sym] = None
         return {
