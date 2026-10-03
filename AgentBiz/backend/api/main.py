@@ -7,6 +7,8 @@ load_dotenv()  # .env del raiz del repo; no pisa variables ya presentes
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional, List
 import json
@@ -354,3 +356,13 @@ app.include_router(fund_router)
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "service": "AgentBiz", "version": "2.0.0", "models": AGENT_MODELS}
+
+STATIC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static"))
+
+
+@app.get("/office")
+def office_page():
+    return FileResponse(os.path.join(STATIC_DIR, "office", "index.html"))
+
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

@@ -82,3 +82,13 @@ def test_office_task_shows_latest_per_agent(client, monkeypatch):
     d = client.get("/api/fund/office").json()
     t = next(x for x in d["agents"] if x["id"] == "trading")["task"]
     assert t["title"] == "nueva"
+
+
+def test_static_and_office_page(client):
+    r = client.get("/office")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+    r2 = client.get("/static/lib/three.min.js")
+    assert r2.status_code == 200
+    r3 = client.get("/api/fund/status")
+    assert r3.status_code == 200
