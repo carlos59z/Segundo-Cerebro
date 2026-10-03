@@ -254,6 +254,9 @@ function applyState() {
     const taskText = a.task && a.task.title ? a.task.title : "en espera";
     drawMonitor(a.id, taskText, working);
   }
+  updateHUD();
+  renderFeed();
+  drawBoard();
 }
 
 async function poll() {
@@ -269,3 +272,79 @@ async function poll() {
 }
 setInterval(poll, 3000);
 poll();
+
+
+const TICKER_SYMS = ["BTC", "ETH", "DIA", "TSLA", "USDJPY"];
+const sessionBase = {};
+
+function updateHUD() {
+  if (!state) return;
+  const f = state.fund;
+  document.getElementById("hud-equity").textContent =
+    "Equity $" + f.equity.toFixed(2) + " · PnL día $" + f.daily_pnl.toFixed(2);
+  document.getElementById("hud-dd").textContent =
+    "Drawdown " + (f.drawdown * 100).toFixed(1) + "%";
+  document.getElementById("hud-trades").textContent =
+    "Trades " + f.trades + " · Win " + Math.round(f.win_rate * 100) + "%";
+  document.getElementById("hud-phase").textContent =
+    f.phase === "aggressive" ? "FASE AGRESIVA" : "FASE MODERADA";
+
+  const parts = [];
+  for (const sym of TICKER_SYMS) {
+    const p = state.tickers[sym];
+    if (p == null) { parts.push(sym + " —"); continue; }
+    if (sessionBase[sym] == null) sessionBase[sym] = p;
+    const pct = ((p - sessionBase[sym]) / sessionBase[sym]) * 100;
+    const sign = pct >= 0 ? "+" : "";
+    parts.push(sym + " $" + p.toFixed(2) + " (" + sign + pct.toFixed(2) + "%)");
+  }
+  document.getElementById("hud-ticker").textContent = parts.join("   ");
+}
+
+function feedName(id) {
+  if (id === "user") return "CEO";
+  return (AGENT_META[id] && AGENT_META[id].name) || id;
+}
+
+function renderFeed() {
+  if (!state) return;
+  const ul = document.getElementById("feed-list");
+  ul.innerHTML = "";
+  for (const m of state.messages) {
+    const li = document.createElement("li");
+    const time = String(m.created_at || "").slice(11, 16);
+    li.innerHTML = '<span class="time">' + time + "</span>" +
+      '<span class="who">' + feedName(m.from_agent) + " → " +
+      feedName(m.to_agent) + "</span><br>";
+    li.appendChild(document.createTextNode(
+      String(m.content || "").slice(0, 140)));
+    ul.appendChild(li);
+  }
+}
+
+function drawBoard() {
+  if (!state) return;
+  const f = state.fund;
+  boardCtx.fillStyle = "#14532d";
+  boardCtx.fillRect(0, 0, 1024, 512);
+  boardCtx.strokeStyle = "#bbf7d0";
+  boardCtx.lineWidth = 6;
+  boardCtx.strokeRect(10, 10, 1004, 492);
+  boardCtx.fillStyle = "#ecfdf5";
+  boardCtx.textAlign = "left";
+  boardCtx.font = "bold 58px Segoe UI";
+  boardCtx.fillText("SEGUNDO CEREBRO CAPITAL", 50, 90);
+  boardCtx.font = "46px Segoe UI";
+  boardCtx.fillText("ESTRATEGIA: " + (f.strategy || "—"), 50, 180);
+  boardCtx.fillText("FASE: " + (f.phase === "aggressive" ? "AGRESIVA" : "MODERADA"), 50, 260);
+  boardCtx.fillText("META: $" + Number(f.target).toLocaleString("es-VE"), 50, 340);
+  boardCtx.fillStyle = f.daily_stop_hit ? "#fca5a5" : "#bbf7d0";
+  boardCtx.fillText("DRAWDOWN: " + (f.drawdown * 100).toFixed(1) + "%", 50, 430);
+  boardTex.needsUpdate = true;
+}
+
+setInterval(() => {
+  document.getElementById("hud-clock").textContent =
+    "NY " + new Date().toLocaleTimeString("es-VE",
+      { timeZone: "America/New_York", hour12: false });
+}, 1000);
