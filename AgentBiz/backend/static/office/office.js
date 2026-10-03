@@ -433,3 +433,94 @@ function updateLine(now) {
     lineTraveler.position.lerpVectors(lineState.from, lineState.to, t);
   }
 }
+
+
+const chatPanel = document.getElementById("chat-panel");
+const chatLog = document.getElementById("chat-log");
+const chatInput = document.getElementById("chat-input");
+const chatSend = document.getElementById("chat-send");
+const chatStatus = document.getElementById("chat-status");
+let currentChat = null;
+
+function chatBubbleRow(cls, text) {
+  const div = document.createElement("div");
+  div.className = "msg " + cls;
+  div.textContent = text;
+  chatLog.appendChild(div);
+  chatLog.scrollTop = chatLog.scrollHeight;
+  return div;
+}
+
+function openChat(id) {
+  currentChat = id;
+  const meta = AGENT_META[id];
+  document.getElementById("chat-title").textContent =
+    meta.emoji + " " + meta.name + " — " + meta.role;
+  chatLog.innerHTML = "";
+  chatStatus.textContent = "";
+  if (state) {
+    const hist = state.messages
+      .filter(m => m.from_agent === id || m.to_agent === id)
+      .slice(0, 10)
+      .reverse();
+    for (const m of hist) {
+      const mine = m.to_agent === id && m.from_agent === "user";
+      chatBubbleRow(mine ? "mine" : "theirs",
+        (mine ? "Tú: " : feedName(m.from_agent) + ": ") + m.content);
+    }
+  }
+  chatPanel.classList.remove("hidden");
+  chatInput.focus();
+}
+
+document.getElementById("chat-close").addEventListener("click", () => {
+  chatPanel.classList.add("hidden");
+  currentChat = null;
+});
+
+async function sendChat(query) {
+  chatSend.disabled = true;
+  chatStatus.style.color = "#7dd3fc";
+  chatStatus.textContent = "Pensando… (hasta 60 s)";
+  chatBubbleRow("mine", "Tú: " + query);
+  try {
+    const r = await fetch("/api/chat/" + currentChat, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: query }),
+    });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const d = await r.json();
+    chatBubbleRow("theirs", AGENT_META[currentChat].name + ": " + d.response);
+    chatStatus.textContent = "";
+  } catch (e) {
+    chatStatus.style.color = "#f87171";
+    chatStatus.textContent = "No se pudo enviar: " + e.message;
+  } finally {
+    chatSend.disabled = false;
+    chatInput.value = "";
+    chatInput.focus();
+  }
+}
+
+document.getElementById("chat-form").addEventListener("submit", e => {
+  e.preventDefault();
+  const q = chatInput.value.trim();
+  if (!q || chatSend.disabled || !currentChat) return;
+  sendChat(q);
+});
+
+renderer.domElement.addEventListener("click", () => {
+  if (dragMoved > 6) return;
+  const ndc = new THREE.Vector2(
+    (lastX / window.innerWidth) * 2 - 1,
+    -(lastY / window.innerHeight) * 2 + 1);
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(ndc, camera);
+  const hits = ray.intersectObjects(
+    Object.values(desks).map(d => d.group), true);
+  if (hits.length) {
+    const id = hits[0].object.userData.agentId;
+    if (id) openChat(id);
+  }
+});
