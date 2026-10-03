@@ -1,5 +1,6 @@
 import os
 import asyncio
+from datetime import datetime, timezone
 from typing import Literal, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -8,6 +9,7 @@ from agents.ai_brain import risk_review
 from backtester import rank_universe
 from market_data import get_price
 import research
+from memory.database import get_db
 from broker_binance import (BrokerError, BrokerOrderInvalid, execution_mode,
                             validate_order, place_order, close_on_exchange,
                             close_sync)
@@ -280,3 +282,55 @@ async def fund_research(req: ResearchRequest):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     return out
+
+
+_OFFICE_TICKERS = ("BTC", "ETH", "DIA", "TSLA", "USDJPY")
+
+
+@router.get("/office")
+async def fund_office():
+    def work():
+        st = _pf().get_status()
+        standard = research.get_standard(FUND_DB)
+        target = research.get_meta(FUND_DB, "target", st["capital"] * 2)
+        db = get_db()
+        try:
+            agents = [dict(r) for r in
+                      db.execute("SELECT * FROM agents ORDER BY rowid")]
+            latest_task = {
+                r["agent_id"]: {"title": r["title"], "status": r["status"]}
+                for r in db.execute(
+                    "SELECT agent_id, title, status FROM tasks t1 "
+                    "WHERE id = (SELECT MAX(id) FROM tasks t2 "
+                    "WHERE t2.agent_id = t1.agent_id)")}
+            messages = [dict(r) for r in db.execute(
+                "SELECT * FROM messages "
+                "ORDER BY created_at DESC, id DESC LIMIT 20")]
+        except Exception:
+            agents, latest_task, messages = [], {}, []
+        finally:
+            db.close()
+        for a in agents:
+            a["task"] = latest_task.get(a["id"])
+        tickers = {}
+        for sym in _OFFICE_TICKERS:
+            try:
+                tickers[sym] = get_price(sym)
+            except Exception:
+                tickers[sym] = None
+        return {
+            "agents": agents,
+            "messages": messages,
+            "fund": {
+                "capital": st["capital"], "equity": st["equity"],
+                "daily_pnl": st["daily_pnl"], "drawdown": st["drawdown"],
+                "trades": st["trades"], "win_rate": st["win_rate"],
+                "open_positions": st["open_positions"],
+                "daily_stop_hit": st["daily_stop_hit"],
+                "phase": st["phase"], "target": target,
+                "strategy": (standard or {}).get("nombre"),
+            },
+            "tickers": tickers,
+            "server_time": datetime.now(timezone.utc).isoformat(),
+        }
+    return await asyncio.to_thread(work)
