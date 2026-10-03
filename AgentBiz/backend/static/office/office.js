@@ -257,6 +257,8 @@ function applyState() {
   updateHUD();
   renderFeed();
   drawBoard();
+  updateBubbles(Date.now());
+  updateLine(Date.now());
 }
 
 async function poll() {
@@ -348,3 +350,86 @@ setInterval(() => {
     "NY " + new Date().toLocaleTimeString("es-VE",
       { timeZone: "America/New_York", hour12: false });
 }, 1000);
+
+
+let bubble = null;
+let bubbleMsgId = 0;
+let bubbleUntil = 0;
+
+function makeBubble(text) {
+  const c = document.createElement("canvas");
+  c.width = 640; c.height = 320;
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = "rgba(248, 250, 252, 0.95)";
+  ctx.beginPath();
+  ctx.roundRect ? ctx.roundRect(0, 0, 640, 320, 28) : ctx.rect(0, 0, 640, 320);
+  ctx.fill();
+  ctx.fillStyle = "#0f172a";
+  ctx.font = "36px Segoe UI";
+  ctx.textAlign = "center";
+  const clipped = String(text || "").slice(0, 90);
+  wrapText(ctx, clipped, 320, 80, 560, 46, 5);
+  const tex = new THREE.CanvasTexture(c);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
+  sp.scale.set(4.4, 2.2, 1);
+  return sp;
+}
+
+function updateBubbles(now) {
+  if (!state) return;
+  const newest = state.messages.find(m =>
+    AGENT_IDS.includes(m.from_agent) && m.content);
+  if (newest && newest.id !== bubbleMsgId) {
+    bubbleMsgId = newest.id;
+    if (bubble) { scene.remove(bubble); bubble = null; }
+    bubble = makeBubble(newest.content);
+    const d = desks[newest.from_agent];
+    bubble.position.set(d.group.position.x, 3.9, d.group.position.z);
+    scene.add(bubble);
+    bubbleUntil = now + 6000;
+  }
+  if (bubble && now > bubbleUntil) {
+    scene.remove(bubble);
+    bubble = null;
+  }
+}
+
+let lineMesh = null;
+let lineTraveler = null;
+let lineMsgId = 0;
+const lineState = { from: null, to: null };
+
+function updateLine(now) {
+  if (!state) return;
+  const m = state.messages.find(x =>
+    AGENT_IDS.includes(x.from_agent) && AGENT_IDS.includes(x.to_agent) &&
+    x.from_agent !== x.to_agent);
+  if (!m) {
+    if (lineMesh) { scene.remove(lineMesh); lineMesh = null; }
+    if (lineTraveler) { scene.remove(lineTraveler); lineTraveler = null; }
+    lineMsgId = 0;
+    return;
+  }
+  if (m.id !== lineMsgId) {
+    lineMsgId = m.id;
+    if (lineMesh) { scene.remove(lineMesh); lineMesh = null; }
+    if (lineTraveler) { scene.remove(lineTraveler); lineTraveler = null; }
+    const a = desks[m.from_agent].group.position;
+    const b = desks[m.to_agent].group.position;
+    lineState.from = new THREE.Vector3(a.x, 2.2, a.z);
+    lineState.to = new THREE.Vector3(b.x, 2.2, b.z);
+    const geo = new THREE.BufferGeometry().setFromPoints(
+      [lineState.from, lineState.to]);
+    lineMesh = new THREE.Line(geo,
+      new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.75 }));
+    scene.add(lineMesh);
+    lineTraveler = new THREE.Mesh(
+      new THREE.SphereGeometry(0.14, 12, 12),
+      new THREE.MeshBasicMaterial({ color: 0x7dd3fc }));
+    scene.add(lineTraveler);
+  }
+  if (lineMesh && lineTraveler && lineState.from) {
+    const t = (now % 2000) / 2000;
+    lineTraveler.position.lerpVectors(lineState.from, lineState.to, t);
+  }
+}
