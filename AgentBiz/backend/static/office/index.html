@@ -1,5 +1,42 @@
 <!DOCTYPE html>
 <html lang="es">
-<head><meta charset="utf-8"><title>Oficina 3D</title></head>
-<body><h1>Oficina 3D — cargando…</h1></body>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Segundo Cerebro Capital — Oficina 3D</title>
+  <link rel="stylesheet" href="/static/office/office.css">
+</head>
+<body>
+  <div id="scene"></div>
+
+  <div id="hud" class="panel">
+    <div id="hud-ticker" class="ticker">—</div>
+    <div id="hud-equity">—</div>
+    <div id="hud-dd">—</div>
+    <div id="hud-trades">—</div>
+    <div id="hud-phase">—</div>
+    <div id="hud-clock">NY —:—:—</div>
+  </div>
+
+  <aside id="feed" class="panel">
+    <h3>Mensajes de la oficina</h3>
+    <ul id="feed-list"></ul>
+  </aside>
+
+  <div id="chat-panel" class="panel hidden">
+    <button id="chat-close" title="Cerrar">✕</button>
+    <h3 id="chat-title">Agente</h3>
+    <div id="chat-log"></div>
+    <form id="chat-form">
+      <input id="chat-input" type="text" placeholder="Escribe al agente…" autocomplete="off">
+      <button id="chat-send" type="submit">Enviar</button>
+    </form>
+    <div id="chat-status"></div>
+  </div>
+
+  <div id="offline" class="hidden">Sin conexión — reintentando…</div>
+
+  <script src="/static/lib/three.min.js"></script>
+  <script src="/static/office/office.js"></script>
+</body>
 </html>
