@@ -10,10 +10,6 @@ const AGENT_META = {
   analytics:  { name: "Analytics",  role: "Director de Estrategias", emoji: "📊" },
 };
 const AGENT_IDS = Object.keys(AGENT_META);
-const AGENT_COLORS = {
-  scout: 0x38bdf8, content: 0xfbbf24, affiliate: 0xf87171, trading: 0x34d399,
-  freelancer: 0xf472b6, social: 0x60a5fa, analytics: 0xa78bfa,
-};
 const DESK_POS = {
   scout: [-7.5, -3.2], analytics: [-2.5, -3.2], trading: [2.5, -3.2],
   content: [7.5, -3.2], freelancer: [-5, 2.6], social: [0, 2.6],
@@ -21,7 +17,7 @@ const DESK_POS = {
 };
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0b1220);
+scene.background = new THREE.Color(0x050505);
 
 const camera = new THREE.PerspectiveCamera(
   45, window.innerWidth / window.innerHeight, 0.1, 200);
@@ -38,24 +34,30 @@ scene.add(dirLight);
 
 const floor = new THREE.Mesh(
   new THREE.BoxGeometry(22, 0.2, 14),
-  new THREE.MeshPhongMaterial({ color: 0x1e293b }));
+  new THREE.MeshPhongMaterial({ color: 0x111111 }));
 floor.position.y = -0.1;
 scene.add(floor);
+const floorGrid = new THREE.GridHelper(21.8, 28, 0x2a2a2a, 0x1c1c1c);
+floorGrid.position.y = 0.01;
+scene.add(floorGrid);
 
 function makeLabel(lines) {
   const c = document.createElement("canvas");
   c.width = 512; c.height = 140;
   const ctx = c.getContext("2d");
-  ctx.fillStyle = "rgba(2, 6, 23, 0.75)";
+  ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
   ctx.beginPath();
   ctx.roundRect ? ctx.roundRect(0, 0, 512, 140, 18) : ctx.rect(0, 0, 512, 140);
   ctx.fill();
+  ctx.strokeStyle = "#444444";
+  ctx.lineWidth = 3;
+  ctx.stroke();
   ctx.textAlign = "center";
-  ctx.fillStyle = "#e2e8f0";
-  ctx.font = "bold 44px Segoe UI";
+  ctx.fillStyle = "#e8e8e8";
+  ctx.font = "bold 44px Consolas";
   ctx.fillText(lines[0], 256, 58);
-  ctx.fillStyle = "#7dd3fc";
-  ctx.font = "30px Segoe UI";
+  ctx.fillStyle = "#f5c518";
+  ctx.font = "30px Consolas";
   ctx.fillText(lines[1], 256, 106);
   const tex = new THREE.CanvasTexture(c);
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
@@ -72,13 +74,13 @@ function buildDesk(id) {
 
   const table = new THREE.Mesh(
     new THREE.BoxGeometry(2.6, 0.14, 1.3),
-    new THREE.MeshPhongMaterial({ color: 0x334155 }));
+    new THREE.MeshPhongMaterial({ color: 0x141414 }));
   table.position.y = 1.0;
   g.add(table);
 
   const leg = new THREE.Mesh(
     new THREE.BoxGeometry(2.3, 0.95, 0.15),
-    new THREE.MeshPhongMaterial({ color: 0x1f2937 }));
+    new THREE.MeshPhongMaterial({ color: 0x0d0d0d }));
   leg.position.y = 0.5;
   g.add(leg);
 
@@ -88,7 +90,7 @@ function buildDesk(id) {
   const monitorTex = new THREE.CanvasTexture(monitorCanvas);
   const monitor = new THREE.Mesh(
     new THREE.BoxGeometry(1.3, 0.75, 0.07),
-    new THREE.MeshPhongMaterial({ color: 0x0f172a }));
+    new THREE.MeshPhongMaterial({ color: 0x0a0a0a }));
   monitor.position.set(0, 1.6, -0.35);
   g.add(monitor);
   const screen = new THREE.Mesh(
@@ -97,16 +99,16 @@ function buildDesk(id) {
   screen.position.set(0, 1.6, -0.31);
   g.add(screen);
 
-  const color = AGENT_COLORS[id];
   const avatar = new THREE.Mesh(
     new THREE.SphereGeometry(0.34, 20, 20),
-    new THREE.MeshPhongMaterial({ color, emissive: color, emissiveIntensity: 0.3 }));
+    new THREE.MeshPhongMaterial({ color: 0x38bdf8, emissive: 0x38bdf8,
+      emissiveIntensity: 0.3 }));
   avatar.position.set(0, 1.05, 0.85);
   g.add(avatar);
 
   const chair = new THREE.Mesh(
     new THREE.CylinderGeometry(0.32, 0.32, 0.12, 16),
-    new THREE.MeshPhongMaterial({ color: 0x0f172a }));
+    new THREE.MeshPhongMaterial({ color: 0x111111 }));
   chair.position.set(0, 0.6, 0.85);
   g.add(chair);
 
@@ -129,12 +131,12 @@ AGENT_IDS.forEach(buildDesk);
 
 const ceoTable = new THREE.Mesh(
   new THREE.BoxGeometry(4.4, 0.18, 1.7),
-  new THREE.MeshPhongMaterial({ color: 0x7c2d12 }));
+  new THREE.MeshPhongMaterial({ color: 0x141414 }));
 ceoTable.position.set(0, 1.0, -6);
 scene.add(ceoTable);
 const ceoLeg = new THREE.Mesh(
   new THREE.BoxGeometry(4.0, 0.95, 0.2),
-  new THREE.MeshPhongMaterial({ color: 0x431407 }));
+  new THREE.MeshPhongMaterial({ color: 0x0d0d0d }));
 ceoLeg.position.set(0, 0.5, -6);
 scene.add(ceoLeg);
 const ceoLabel = makeLabel(["🧑‍💼 CEO", "Mesa de Carlos"]);
@@ -233,10 +235,10 @@ function drawMonitor(id, text, working) {
   const d = desks[id];
   if (!d) return;
   const ctx = d.monitorCtx;
-  ctx.fillStyle = working ? "#451a03" : "#082f49";
+  ctx.fillStyle = working ? "#1a1200" : "#001a00";
   ctx.fillRect(0, 0, 512, 256);
-  ctx.fillStyle = working ? "#fbbf24" : "#7dd3fc";
-  ctx.font = "bold 34px Segoe UI";
+  ctx.fillStyle = working ? "#f5c518" : "#4dff88";
+  ctx.font = "bold 34px Consolas";
   ctx.textAlign = "center";
   wrapText(ctx, text || "—", 256, 70, 460, 44, 4);
   d.monitorTex.needsUpdate = true;
@@ -249,8 +251,11 @@ function applyState() {
     if (!d) continue;
     const working = a.status === "working" || localWorking.has(a.id);
     d.working = working;
-    d.light.color.setHex(working ? 0xfbbf24 : 0x38bdf8);
+    d.light.color.setHex(working ? 0xf5c518 : 0x38bdf8);
     d.light.intensity = working ? 1.8 : 0.5;
+    const avColor = working ? 0xf5c518 : 0x38bdf8;
+    d.avatar.material.color.setHex(avColor);
+    d.avatar.material.emissive.setHex(avColor);
     const taskText = a.task && a.task.title ? a.task.title : "en espera";
     drawMonitor(a.id, taskText, working);
   }
@@ -344,21 +349,26 @@ function renderFeed() {
 function drawBoard() {
   if (!state) return;
   const f = state.fund;
-  boardCtx.fillStyle = "#14532d";
+  boardCtx.fillStyle = "#001200";
   boardCtx.fillRect(0, 0, 1024, 512);
-  boardCtx.strokeStyle = "#bbf7d0";
+  boardCtx.strokeStyle = "#1a5c1a";
   boardCtx.lineWidth = 6;
   boardCtx.strokeRect(10, 10, 1004, 492);
-  boardCtx.fillStyle = "#ecfdf5";
+  boardCtx.shadowColor = "#4dff88";
+  boardCtx.shadowBlur = 10;
+  boardCtx.fillStyle = "#baffd0";
   boardCtx.textAlign = "left";
-  boardCtx.font = "bold 58px Segoe UI";
+  boardCtx.font = "bold 58px Consolas";
   boardCtx.fillText("SEGUNDO CEREBRO CAPITAL", 50, 90);
-  boardCtx.font = "46px Segoe UI";
+  boardCtx.shadowBlur = 6;
+  boardCtx.fillStyle = "#4dff88";
+  boardCtx.font = "46px Consolas";
   boardCtx.fillText("ESTRATEGIA: " + (f.strategy || "—"), 50, 180);
   boardCtx.fillText("FASE: " + (f.phase === "aggressive" ? "AGRESIVA" : "MODERADA"), 50, 260);
   boardCtx.fillText("META: $" + Number(f.target).toLocaleString("es-VE"), 50, 340);
-  boardCtx.fillStyle = f.daily_stop_hit ? "#fca5a5" : "#bbf7d0";
+  boardCtx.fillStyle = f.daily_stop_hit ? "#ff7043" : "#baffd0";
   boardCtx.fillText("DRAWDOWN: " + (f.drawdown * 100).toFixed(1) + "%", 50, 430);
+  boardCtx.shadowBlur = 0;
   boardTex.needsUpdate = true;
 }
 
@@ -377,12 +387,15 @@ function makeBubble(text) {
   const c = document.createElement("canvas");
   c.width = 640; c.height = 320;
   const ctx = c.getContext("2d");
-  ctx.fillStyle = "rgba(248, 250, 252, 0.95)";
+  ctx.fillStyle = "rgba(10, 10, 10, 0.95)";
   ctx.beginPath();
   ctx.roundRect ? ctx.roundRect(0, 0, 640, 320, 28) : ctx.rect(0, 0, 640, 320);
   ctx.fill();
-  ctx.fillStyle = "#0f172a";
-  ctx.font = "36px Segoe UI";
+  ctx.strokeStyle = "#f5c518";
+  ctx.lineWidth = 6;
+  ctx.stroke();
+  ctx.fillStyle = "#4dff88";
+  ctx.font = "36px Consolas";
   ctx.textAlign = "center";
   const clipped = String(text || "").slice(0, 90);
   wrapText(ctx, clipped, 320, 80, 560, 46, 5);
@@ -438,11 +451,11 @@ function updateLine(now) {
     const geo = new THREE.BufferGeometry().setFromPoints(
       [lineState.from, lineState.to]);
     lineMesh = new THREE.Line(geo,
-      new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.75 }));
+      new THREE.LineBasicMaterial({ color: 0x4dff88, transparent: true, opacity: 0.75 }));
     scene.add(lineMesh);
     lineTraveler = new THREE.Mesh(
       new THREE.SphereGeometry(0.14, 12, 12),
-      new THREE.MeshBasicMaterial({ color: 0x7dd3fc }));
+      new THREE.MeshBasicMaterial({ color: 0x4dff88 }));
     scene.add(lineTraveler);
   }
   if (lineMesh && lineTraveler && lineState.from) {
@@ -500,7 +513,7 @@ async function sendChat(query) {
   const target = currentChat;
   chatSend.disabled = true;
   chatStatus.className = "busy";
-  chatStatus.style.color = "#7dd3fc";
+  chatStatus.style.color = "#00e676";
   chatStatus.textContent = "Pensando… (hasta 60 s)";
   chatBubbleRow("mine", "Tú: " + query);
   localWorking.add(target);
