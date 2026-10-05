@@ -47,5 +47,40 @@ class VikingMemory:
             log.warning("openviking no disponible: %s", e)
         return self.enabled
 
+    def _node_text(self, node) -> str:
+        if isinstance(node, str):
+            return node.strip()
+        if not isinstance(node, dict):
+            return ""
+        parts = []
+        for key in ("content", "text", "abstract", "overview"):
+            val = node.get(key)
+            if isinstance(val, str) and val.strip():
+                parts.append(val.strip())
+        if not parts:
+            return ""
+        uri = node.get("uri")
+        joined = " — ".join(parts)
+        return f"[{uri}] {joined}" if uri else joined
+
+    def retrieve(self, agent_id: str, query: str) -> str:
+        if not self.enabled:
+            return ""
+        try:
+            result = self._client.find(
+                query=query,
+                limit=RETRIEVE_LIMIT,
+                target_uri=f"{MEMORY_ROOT}/{agent_id}",
+            )
+            items = result if isinstance(result, list) else (
+                result.get("nodes") or result.get("results") or []
+                if isinstance(result, dict) else []
+            )
+            texts = [t for t in (self._node_text(n) for n in items) if t]
+            return "\n".join(texts)[:MAX_CONTEXT_CHARS]
+        except Exception as e:
+            log.warning("viking retrieve fallo: %s", e)
+            return ""
+
 
 memory = VikingMemory()
