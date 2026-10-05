@@ -82,5 +82,35 @@ class VikingMemory:
             log.warning("viking retrieve fallo: %s", e)
             return ""
 
+    def save(self, agent_id: str, user_msg: str, response: str) -> bool:
+        if not self.enabled:
+            return False
+        if any(response.startswith(p) for p in ERROR_PREFIXES):
+            return False
+        if len(response.strip()) <= 20:
+            return False
+        try:
+            sid = f"agentbiz-{agent_id}"
+            if sid not in self._sessions_ready:
+                try:
+                    self._client.create_session(session_id=sid, options={
+                        "memory_extraction_config": {
+                            "events": {"tags": [f"agent={agent_id}"]},
+                        },
+                    })
+                except Exception:
+                    # la sesion ya existe en el server: se reutiliza
+                    pass
+                self._sessions_ready.add(sid)
+            session = self._client.session(session_id=sid)
+            session.add_message(role="user", content=user_msg[:2000])
+            session.add_message(role="assistant",
+                                content=response[:2000], peer_id=agent_id)
+            session.commit(options={"event_tags": [f"agent={agent_id}"]})
+            return True
+        except Exception as e:
+            log.warning("viking save fallo: %s", e)
+            return False
+
 
 memory = VikingMemory()

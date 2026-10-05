@@ -110,3 +110,88 @@ def test_retrieve_deshabilitado_o_con_fallo_devuelve_vacio():
         def find(self, **kw): raise RuntimeError("server exploded")
     m2 = _enabled_memory(Boom())
     assert m2.retrieve("scout", "q") == ""   # degrada, no lanza
+# añadir al final de AgentBiz/tests/test_viking_memory.py
+
+class SessionRecorder:
+    """Cliente falso que graba las llamadas de sesion."""
+    def __init__(self, fail_create=False):
+        self.calls = []
+        self.sessions = {}
+        self.fail_create = fail_create
+    def initialize(self): pass
+    def health(self): return {"status": "ok"}
+    def create_session(self, session_id=None, options=None):
+        if self.fail_create:
+            raise RuntimeError("session already exists")
+        self.calls.append(("create", session_id))
+        return {"session_id": session_id}
+    def session(self, session_id=None):
+        rec = self
+        class S:
+            def add_message(self, role=None, content=None, peer_id=None, parts=None):
+                rec.calls.append(("msg", role, peer_id, (content or "")[:40]))
+            def commit(self, options=None):
+                rec.calls.append(("commit", session_id))
+        return S()
+
+
+def test_save_ok_crea_sesion_mensajes_y_commit():
+    from agents.viking_memory import VikingMemory
+    c = SessionRecorder()
+    m = VikingMemory(client=c); m.connect()
+    ok = m.save("scout", "analiza btc", "BTC mantiene soporte en 64k con volumen alto.")
+    assert ok is True
+    roles = [x[1] for x in c.calls if x[0] == "msg"]
+    assert roles == ["user", "assistant"]
+    assert any(x[0] == "commit" for x in c.calls)
+    assistant = [x for x in c.calls if x[0] == "msg" and x[1] == "assistant"][0]
+    assert assistant[2] == "scout"
+
+
+def test_save_segunda_vez_no_vuelve_a_crear_sesion():
+    from agents.viking_memory import VikingMemory
+    c = SessionRecorder()
+    m = VikingMemory(client=c); m.connect()
+    m.save("scout", "q1", "Respuesta larga y util del primer turno.")
+    m.save("scout", "q2", "Respuesta larga y util del segundo turno.")
+    creates = [x for x in c.calls if x[0] == "create"]
+    assert len(creates) == 1
+    assert len([x for x in c.calls if x[0] == "commit"]) == 2
+
+
+def test_save_tolera_sesion_ya_existente_en_el_servidor():
+    from agents.viking_memory import VikingMemory
+    c = SessionRecorder(fail_create=True)
+    m = VikingMemory(client=c); m.connect()
+    ok = m.save("scout", "q", "Respuesta larga a pesar de sesion existente.")
+    assert ok is True
+    assert any(x[0] == "commit" for x in c.calls)
+
+
+def test_save_no_archiva_mensajes_de_error_del_llm():
+    from agents.viking_memory import VikingMemory, ERROR_PREFIXES
+    for prefix in ERROR_PREFIXES:
+        c = SessionRecorder()
+        m = VikingMemory(client=c); m.connect()
+        assert m.save("scout", "q", prefix + " detalle") is False, prefix
+        assert not [x for x in c.calls if x[0] in ("create", "commit")]
+
+
+def test_save_no_archiva_respuestas_cortas():
+    from agents.viking_memory import VikingMemory
+    c = SessionRecorder()
+    m = VikingMemory(client=c); m.connect()
+    assert m.save("scout", "q", "ok") is False
+    assert not [x for x in c.calls if x[0] == "commit"]
+
+
+def test_save_deshabilitado_o_con_fallo_devuelve_false():
+    from agents.viking_memory import VikingMemory
+    assert VikingMemory().save("scout", "q", "Respuesta larga suficiente aqui.") is False
+
+    class Boom(SessionRecorder):
+        def session(self, session_id=None):
+            raise RuntimeError("write rejected")
+    c = Boom()
+    m = VikingMemory(client=c); m.connect()
+    assert m.save("scout", "q", "Respuesta larga suficiente aqui.") is False
