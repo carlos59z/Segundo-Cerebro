@@ -148,44 +148,72 @@ def ask_nvidia_sync(prompt: str, system: str = "", model: str = None,
         "stream": False,
     }
 
+    last_error = "Sin respuesta"
+    # archivo temporal propio por llamada: dos chats concurrentes no deben
+    # pisarse el mismo nvidia_request.json (race en el feed de la oficina)
+    fd, body_path = tempfile.mkstemp(prefix="nvidia_request_", suffix=".json")
+    os.close(fd)
     try:
-        body = json.dumps(data)
-        path = os.path.join(tempfile.gettempdir(), "nvidia_request.json")
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write(body)
+        with open(body_path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(data))
 
-        result = subprocess.run(
-            [CURL_PATH, "-s", "--max-time", "60", "-X", "POST",
-             f"{NVIDIA_BASE_URL}/chat/completions",
-             "-H", f"Authorization: Bearer {NVIDIA_API_KEY}",
-             "-H", "Content-Type: application/json",
-             f"-d@{path}"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=65
-        )
+        for _attempt in range(2):  # reintento unico ante fallo de transporte o respuesta vacia
+            result = subprocess.run(
+                [CURL_PATH, "-s", "--show-error", "--max-time", "60", "-X", "POST",
+                 f"{NVIDIA_BASE_URL}/chat/completions",
+                 "-H", f"Authorization: Bearer {NVIDIA_API_KEY}",
+                 "-H", "Content-Type: application/json",
+                 f"-d@{body_path}"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=65
+            )
 
-        if result.stdout:
-            resp = json.loads(result.stdout)
+            if result.returncode != 0 or not (result.stdout or "").strip():
+                # fallo de transporte: con -s el motivo se perdia; ahora sale del exit code
+                rc = result.returncode
+                if rc == 28:
+                    last_error = "Timeout - el modelo tardo mas de 60s. Intenta de nuevo."
+                elif rc in (6, 7, 22, 35, 52, 56):
+                    last_error = f"Error de red (curl {rc}): {(result.stderr or '').strip()[:200] or 'sin detalle'}"
+                else:
+                    last_error = f"Error curl (codigo {rc}): {(result.stderr or '').strip()[:200] or 'sin salida'}"
+                continue
+
+            try:
+                resp = json.loads(result.stdout)
+            except ValueError:
+                last_error = "Respuesta ilegible del modelo (JSON invalido). Intenta de nuevo."
+                continue
+
             if "choices" in resp and len(resp["choices"]) > 0:
                 msg = resp["choices"][0]["message"]
-                response = msg.get("content") or msg.get("reasoning_content") or "Sin respuesta del modelo"
-                if response and len(response) > 10:
+                # cualquier contenido no vacio es valido: no cortar por longitud
+                # (un "FUNCIONA" o "APRUEBA: si" es una respuesta legitima)
+                response = ((msg.get("content") or "").strip()
+                            or (msg.get("reasoning_content") or "").strip())
+                if response:
                     if agent_id:
                         memory.save_turn(agent_id, prompt, response)
                     return response
-                else:
-                    return "El modelo devolvio una respuesta muy corta. Intenta de nuevo."
+                last_error = "El modelo devolvio una respuesta vacia. Intenta de nuevo."
+                continue
             elif "error" in resp:
+                # error de la API (autenticacion, modelo): el reintento no ayuda
                 return f"Error NVIDIA: {resp['error'].get('message', 'Unknown')}"
             else:
                 return f"Respuesta inesperada: {result.stdout[:200]}"
-        else:
-            return f"Error: {result.stderr[:200] if result.stderr else 'Sin respuesta'}"
 
     except subprocess.TimeoutExpired:
-        return "Timeout - el modelo esta tardando mucho. Intenta de nuevo."
+        last_error = "Timeout - el modelo esta tardando mucho. Intenta de nuevo."
     except Exception as e:
         return f"Error: {str(e)}"
+    finally:
+        try:
+            os.unlink(body_path)
+        except OSError:
+            pass
+
+    return last_error
 
 async def ask_nvidia(prompt: str, system: str = "", model: str = None,
                      max_tokens: int = 1000, temperature: float = 0.7,
