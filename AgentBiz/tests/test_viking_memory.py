@@ -195,3 +195,109 @@ def test_save_deshabilitado_o_con_fallo_devuelve_false():
     c = Boom()
     m = VikingMemory(client=c); m.connect()
     assert m.save("scout", "q", "Respuesta larga suficiente aqui.") is False
+
+
+# --- Task 4: flujo de chat_with_agent ---
+
+import asyncio
+
+
+def _run_chat(agent_id, message, fake_mem, monkeypatch):
+    import agents.ai_brain as ab
+    monkeypatch.setattr(ab, "memory_viking", fake_mem)
+    captured = {}
+
+    async def fake_ask(prompt, system="", model=None, max_tokens=1000,
+                       temperature=0.7, agent_id=None, user_label=None):
+        captured["prompt"] = prompt
+        captured["user_label"] = user_label
+        return "Respuesta larga y completa del agente para el usuario."
+    monkeypatch.setattr(ab, "ask_nvidia", fake_ask)
+    return asyncio.run(ab.chat_with_agent(agent_id, message)), captured
+
+
+def test_chat_inyecta_contexto_de_memoria(monkeypatch):
+    class M:
+        enabled = True
+        def retrieve(self, agent_id, query):
+            return "[viking] hallazgo previo: soporte en 64k"
+        def save(self, agent_id, user_msg, response): return True
+    out, cap = _run_chat("scout", "que ves en btc?", M(), monkeypatch)
+    assert "hallazgo previo: soporte en 64k" in cap["prompt"]
+    assert "que ves en btc?" in cap["prompt"]
+
+
+def test_chat_sin_contexto_usa_prompt_original(monkeypatch):
+    class M:
+        enabled = True
+        def retrieve(self, agent_id, query): return ""
+        def save(self, agent_id, user_msg, response): return True
+    out, cap = _run_chat("scout", "hola", M(), monkeypatch)
+    assert cap["prompt"] == "hola"
+
+
+def test_chat_sin_memoria_o_con_timeout_sigue_normal(monkeypatch):
+    class M:
+        enabled = False
+        def retrieve(self, a, q): raise AssertionError("no debe llamar")
+        def save(self, *x): return False
+    out, cap = _run_chat("scout", "pregunta normal", M(), monkeypatch)
+    assert cap["prompt"] == "pregunta normal"
+    assert "Respuesta larga" in out
+
+
+def test_memoria_solo_save_recibe_pregunta_original(monkeypatch):
+    # el user_label evita que el prompt enriquecido contamine SQLite
+    class M:
+        enabled = True
+        def retrieve(self, a, q): return "contexto largo de viking"
+        def save(self, *x): return True
+    out, cap = _run_chat("trading", "senal de hoy", M(), monkeypatch)
+    assert cap["user_label"] == "senal de hoy"
+
+
+def test_chat_dispara_save_en_background(monkeypatch):
+    class M:
+        enabled = True
+        called = None
+        def retrieve(self, a, q): return ""
+        def save(self, agent_id, user_msg, response):
+            M.called = (agent_id, user_msg, response)
+            return True
+    import agents.ai_brain as ab
+
+    async def main():
+        monkeypatch.setattr(ab, "memory_viking", M())
+        async def fake_ask(prompt, **kw):
+            return "Respuesta larga suficiente para guardarse bien."
+        monkeypatch.setattr(ab, "ask_nvidia", fake_ask)
+        out = await ab.chat_with_agent("scout", "pregunta")
+        pending = list(getattr(ab.chat_with_agent, "_pending", []))
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        return out, M.called
+    out, called = asyncio.run(main())
+    assert called is not None
+    assert called[0] == "scout"
+    assert called[1] == "pregunta"
+
+
+def test_recuperacion_de_contexto_respetando_timeout(monkeypatch):
+    # retrieve que se cuelga > RETRIEVE_TIMEOUT_S no bloquea el chat
+    import agents.ai_brain as ab
+    from agents import viking_memory as vm
+
+    class Slow:
+        enabled = True
+        def retrieve(self, a, q):
+            import time; time.sleep(vm.RETRIEVE_TIMEOUT_S + 1)
+            return "tarde"
+        def save(self, *x): return True
+    monkeypatch.setattr(ab, "memory_viking", Slow())
+    captured = {}
+    async def fake_ask(prompt, **kw):
+        captured["prompt"] = prompt
+        return "Respuesta larga del agente tras espera acotada."
+    monkeypatch.setattr(ab, "ask_nvidia", fake_ask)
+    out = asyncio.run(ab.chat_with_agent("scout", "rapido"))
+    assert captured["prompt"] == "rapido"   # contexto descartado, chat normal

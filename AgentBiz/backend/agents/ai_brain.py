@@ -3,10 +3,15 @@ import sqlite3
 import subprocess
 import os
 import asyncio
+import logging
 import tempfile
 import urllib.request
 from typing import List, Dict
 from datetime import datetime
+
+from agents import viking_memory as _vm
+
+log = logging.getLogger("agentbiz.ai_brain")
 
 
 def _load_secret(name: str, default: str = "") -> str:
@@ -126,7 +131,7 @@ memory = ConversationMemory()
 
 def ask_nvidia_sync(prompt: str, system: str = "", model: str = None,
                     max_tokens: int = 1000, temperature: float = 0.7,
-                    agent_id: str = None) -> str:
+                    agent_id: str = None, user_label: str = None) -> str:
     if model is None:
         model = AGENT_MODELS.get(agent_id, AGENT_MODELS["default"])
 
@@ -193,7 +198,7 @@ def ask_nvidia_sync(prompt: str, system: str = "", model: str = None,
                             or (msg.get("reasoning_content") or "").strip())
                 if response:
                     if agent_id:
-                        memory.save_turn(agent_id, prompt, response)
+                        memory.save_turn(agent_id, user_label or prompt, response)
                     return response
                 last_error = "El modelo devolvio una respuesta vacia. Intenta de nuevo."
                 continue
@@ -217,9 +222,10 @@ def ask_nvidia_sync(prompt: str, system: str = "", model: str = None,
 
 async def ask_nvidia(prompt: str, system: str = "", model: str = None,
                      max_tokens: int = 1000, temperature: float = 0.7,
-                     agent_id: str = None) -> str:
+                     agent_id: str = None, user_label: str = None) -> str:
     return await asyncio.to_thread(
-        ask_nvidia_sync, prompt, system, model, max_tokens, temperature, agent_id)
+        ask_nvidia_sync, prompt, system, model, max_tokens, temperature,
+        agent_id, user_label)
 
 async def scout_research(topic: str) -> str:
     return await ask_nvidia(
@@ -273,8 +279,36 @@ async def analytics_report(data: dict) -> str:
 
 async def chat_with_agent(agent_id: str, message: str) -> str:
     system = AGENT_SYSTEM_PROMPTS.get(agent_id, AGENT_SYSTEM_PROMPTS["scout"])
-    return await ask_nvidia(message, system=system, agent_id=agent_id,
-                            max_tokens=4000)
+
+    context = ""
+    try:
+        context = await asyncio.wait_for(
+            asyncio.to_thread(memory_viking.retrieve, agent_id, message),
+            timeout=_vm.RETRIEVE_TIMEOUT_S + 0.5,
+        )
+    except Exception as e:
+        log.debug("viking retrieve omitido: %s", e)
+
+    prompt = message
+    if context:
+        prompt = ("Contexto de tu memoria (usa solo si ayuda):\n"
+                  f"{context}\n\nPregunta actual:\n{message}")
+
+    response = await ask_nvidia(prompt, system=system, agent_id=agent_id,
+                                max_tokens=4000, user_label=message)
+
+    task = asyncio.get_running_loop().create_task(
+        asyncio.wait_for(
+            asyncio.to_thread(memory_viking.save, agent_id, message, response),
+            timeout=_vm.SAVE_TIMEOUT_S + 0.5,
+        )
+    )
+    chat_with_agent._pending.add(task)
+    task.add_done_callback(chat_with_agent._pending.discard)
+    return response
+
+chat_with_agent._pending = set()
+memory_viking = _vm.memory
 
 def _fetch_trader(symbol: str, interval: str, risk: str) -> dict:
     url = f"{TRADER_API}/api/operation/{symbol}?interval={interval}&risk={risk}"
