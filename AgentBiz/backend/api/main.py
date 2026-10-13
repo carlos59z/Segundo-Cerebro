@@ -70,6 +70,25 @@ async def startup():
     init_db()
     start_auto_trader()
 
+    from agents.viking_memory import memory as viking_memory
+    import threading
+    import logging
+    log = logging.getLogger("viking.startup")
+
+    def _viking_loop():
+        # reintento cada 10 min hasta conectar; nunca bloquea el startup
+        import time
+        while True:
+            if viking_memory.enabled:
+                return
+            if viking_memory.connect():
+                log.info("openviking conectado")
+                return
+            log.warning("openviking deshabilitado: %s", viking_memory.reason)
+            time.sleep(600)
+
+    threading.Thread(target=_viking_loop, daemon=True).start()
+
 AGENT_MAP = {
     'scout': scout_research,
     'content': content_create,
