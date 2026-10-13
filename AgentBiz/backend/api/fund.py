@@ -11,6 +11,8 @@ from agents.ai_brain import risk_review
 from backtester import rank_universe
 from market_data import get_price
 import research
+import econ_calendar
+import risk_committee
 from memory.database import get_db
 from broker_binance import (BrokerError, BrokerOrderInvalid, execution_mode,
                             validate_order, place_order, close_on_exchange,
@@ -107,6 +109,35 @@ async def fund_orders(req: OrderRequest):
             raise HTTPException(status_code=422, detail="SL/TP obligatorios")
         if req.qty_usd <= 0 or req.entry <= 0:
             raise HTTPException(status_code=422, detail="qty_usd y entry deben ser > 0")
+        cal_reason = await asyncio.to_thread(
+            lambda: econ_calendar.blocked_reason(req.symbol))
+        if cal_reason:
+            raise HTTPException(
+                status_code=409,
+                detail=f"calendario: evento de alto impacto ({cal_reason}); "
+                       "aperturas bloqueadas en la ventana del evento")
+        committee = await asyncio.to_thread(
+            lambda: risk_committee.evaluate(FUND_DB))
+        cl = committee["limits"]
+        if committee["mode"] == "defensivo":
+            raise HTTPException(
+                status_code=409,
+                detail="comite de riesgo: modo defensivo "
+                       f"({'; '.join(committee['reasons'])}); sin aperturas")
+        if req.leverage > cl["max_leverage"]:
+            raise HTTPException(
+                status_code=409,
+                detail=f"comite de riesgo: apalancamiento {req.leverage} "
+                       f"por encima del limite {cl['max_leverage']} "
+                       f"(modo {committee['mode']})")
+        open_positions = await asyncio.to_thread(
+            lambda: _pf().get_positions("open"))
+        if len(open_positions) >= cl["max_positions"]:
+            raise HTTPException(
+                status_code=409,
+                detail=f"comite de riesgo: {len(open_positions)} posiciones "
+                       f"abiertas, limite {cl['max_positions']} "
+                       f"(modo {committee['mode']})")
         mode = execution_mode()
         if mode != "paper":
             try:
@@ -164,6 +195,7 @@ async def fund_orders(req: OrderRequest):
         except Exception:
             pass  # auditoria best-effort: no falla la orden
         return {"position": pos, "risk_review": review_result,
+                "risk_committee": committee,
                 "execution": {"mode": mode,
                               "broker": f"binance-{mode}" if mode != "paper" else None,
                               "order_id": order_id}}
@@ -241,9 +273,15 @@ async def fund_mark():
         st = p.get_status()
         incubation = research.update_incubation(
             FUND_DB, p.get_equity_curve(limit=10000))
+        committee = risk_committee.evaluate(FUND_DB, pf=p)
         return {"marked": marked, "open": st["open_positions"],
                 "closed": closed, "failed": failed, "broker_sync_failed": sync_failed,
-                "incubation": incubation["status"], "status": st}
+                "incubation": incubation["status"],
+                "risk_committee": {"mode": committee["mode"],
+                                   "reasons": committee["reasons"],
+                                   "limits": {"max_positions": committee["limits"]["max_positions"],
+                                              "max_leverage": committee["limits"]["max_leverage"]}},
+                "status": st}
     return await asyncio.to_thread(work)
 
 
@@ -293,6 +331,19 @@ async def fund_research(req: ResearchRequest):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     return out
+
+
+@router.get("/calendar")
+async def fund_calendar():
+    def work():
+        events = econ_calendar.upcoming_high_impact(hours_ahead=72)
+        return {"source": "forexfactory",
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+                "high_impact": [
+                    {"title": e["title"], "country": e["country"],
+                     "date": e["date"].isoformat(), "impact": e["impact"]}
+                    for e in events]}
+    return await asyncio.to_thread(work)
 
 
 _OFFICE_TICKERS = ("BTC", "ETH", "DIA", "TSLA", "USDJPY")
