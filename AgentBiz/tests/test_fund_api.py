@@ -150,6 +150,23 @@ def test_research_endpoint_reads_vigente_phase(client, monkeypatch):
     assert seen["phase"] is None  # el router deja que el ciclo lea la fase vigente
 
 
+def test_research_endpoint_mineria_mode(client, monkeypatch):
+    import research
+    seen = {}
+
+    def fake_run(**kw):
+        seen.update(kw)
+        return {"status": "ok", "tested": 5, "runs": 0, "standard": None}
+
+    monkeypatch.setattr(research, "run_research", fake_run)
+    r = client.post("/api/fund/research", json={"mode": "mineria"})
+    assert r.status_code == 200 and r.json()["status"] == "ok"
+    assert seen.get("refresh_days") == 14
+    specs = seen.get("specs")
+    assert isinstance(specs, list) and specs
+    assert all("grid" in s for s in specs)
+
+
 def test_risk_review_fails_closed(monkeypatch):
     import asyncio
     import agents.ai_brain as ab

@@ -89,19 +89,25 @@ def save_spec(db_path, base, params, nombre, phase):
         c.execute("INSERT OR IGNORE INTO research_specs(fingerprint,nombre,base,params_json,phase,created_at) "
                   "VALUES(?,?,?,?,?,?)",
                   (fp, nombre, base, json.dumps(params, sort_keys=True), phase, _now()))
+        # retest: refresca created_at para no retestear en cada ciclo
+        c.execute("UPDATE research_specs SET created_at=? WHERE fingerprint=?",
+                  (_now(), fp))
         c.commit()
     finally:
         c.close()
     return fp
 
 
-def known_fingerprints(db_path):
+def known_fingerprints(db_path, with_age=False):
     c = _conn(db_path)
     try:
-        rows = c.execute("SELECT fingerprint FROM research_specs").fetchall()
+        rows = c.execute(
+            "SELECT fingerprint, created_at FROM research_specs").fetchall()
     finally:
         c.close()
-    return {r[0] for r in rows}
+    if not with_age:
+        return {r[0] for r in rows}
+    return {r[0]: {"created_at": r[1]} for r in rows}
 
 
 def record_run(db_path, fp, symbol, strategy, metrics):
@@ -307,15 +313,49 @@ def generate_hypotheses(phase="aggressive", n=3):
     return parse_hypotheses(raw)
 
 
-def run_research(db_path="fund.db", phase=None, period="1y"):
+# grillas deterministas del "algo maker" (minería continua del fondo del video)
+MINING_GRIDS = [
+    {"nombre": "mineria sma", "base": "sma_cross",
+     "grid": {"fast": [5, 8, 11, 15], "slow": [20, 30, 50, 100]}},
+    {"nombre": "mineria rsi", "base": "rsi_reversion",
+     "grid": {"period": [7, 14], "oversold": [20, 25, 30], "overbought": [70, 75, 80]}},
+    {"nombre": "mineria momentum", "base": "momentum_30d",
+     "grid": {"window": [10, 20, 30, 60], "threshold": [0.03, 0.05, 0.08]}},
+    {"nombre": "mineria donchian", "base": "donchian_breakout",
+     "grid": {"channel": [10, 15, 20, 30, 55], "atr_period": [14, 21]}},
+    {"nombre": "mineria macd", "base": "macd_trend",
+     "grid": {"fast": [8, 12], "slow": [21, 26], "signal_period": [5, 9]}},
+    {"nombre": "mineria bollinger", "base": "bollinger_reversion",
+     "grid": {"window": [15, 20, 25], "devs": [1.5, 2.0, 2.5]}},
+]
+
+
+def mine_specs():
+    """Grillas deterministas para el ciclo de mineria (sin LLM)."""
+    return [dict(g) for g in MINING_GRIDS]
+
+
+def run_research(db_path="fund.db", phase=None, period="1y",
+                 specs=None, refresh_days=0):
+    """Ciclo completo. specs explícitas => minería determinista (sin LLM).
+
+    refresh_days > 0: retestea SPECs cuya creacion tiene mas de N dias
+    (la minería continua del "algo maker"; 0 = dedupe histórico estricto).
+    """
     import statistics
     init_research_db(db_path)
     if phase is None:
         phase = get_meta(db_path, "phase", "aggressive")
         if phase not in ("aggressive", "moderate"):
             phase = "aggressive"
-    hypotheses = generate_hypotheses(phase)
-    known = known_fingerprints(db_path)
+    hypotheses = specs if specs is not None else generate_hypotheses(phase)
+    if refresh_days > 0:
+        known_ages = known_fingerprints(db_path, with_age=True)
+        cutoff = (datetime.datetime.now(datetime.timezone.utc)
+                  - datetime.timedelta(days=refresh_days))
+    else:
+        known = known_fingerprints(db_path)
+        known_ages = None
     new_specs = []
     for h in hypotheses:
         try:
@@ -324,10 +364,22 @@ def run_research(db_path="fund.db", phase=None, period="1y"):
             continue  # hipotesis invalida: se salta, no aborta ni consume el ciclo
         for concrete in variants:
             fp = spec_fingerprint(concrete["base"], concrete["params"])
-            if fp in known:
+            if known_ages is not None:
+                info = known_ages.get(fp)
+                if info is not None:
+                    try:
+                        created = datetime.datetime.fromisoformat(info["created_at"])
+                    except (TypeError, ValueError):
+                        continue
+                    if created > cutoff:
+                        continue  # aun fresca: se salta
+                    # vencida: se retestea (el fingerprint se re-guarda con fecha nueva)
+                known_ages[fp] = {"created_at": _now()}
+            elif fp in known:
                 continue
             new_specs.append((fp, concrete))
-            known.add(fp)
+            if known_ages is None:
+                known.add(fp)
     if not new_specs:
         return {"status": "sin_specs_nuevas", "tested": 0, "runs": 0,
                 "standard": get_standard(db_path)}

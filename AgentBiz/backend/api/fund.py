@@ -255,6 +255,7 @@ class BacktestRequest(BaseModel):
 class ResearchRequest(BaseModel):
     phase: Optional[Literal["aggressive", "moderate"]] = None
     period: str = "1y"
+    mode: Literal["llm", "mineria"] = "llm"
 
 
 @router.post("/backtest")
@@ -280,9 +281,15 @@ async def fund_strategies():
 @router.post("/research")
 async def fund_research(req: ResearchRequest):
     try:
-        out = await asyncio.to_thread(
-            lambda: research.run_research(db_path=FUND_DB, phase=req.phase,
-                                          period=req.period))
+        if req.mode == "mineria":
+            out = await asyncio.to_thread(
+                lambda: research.run_research(
+                    db_path=FUND_DB, phase=req.phase, period=req.period,
+                    specs=research.mine_specs(), refresh_days=14))
+        else:
+            out = await asyncio.to_thread(
+                lambda: research.run_research(db_path=FUND_DB, phase=req.phase,
+                                              period=req.period))
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     return out
