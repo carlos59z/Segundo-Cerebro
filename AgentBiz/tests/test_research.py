@@ -1,4 +1,4 @@
-import pandas as pd
+﻿import pandas as pd
 import pytest
 import research
 import strategies as st
@@ -115,12 +115,14 @@ def test_parse_hypotheses_without_json_raises():
 def test_run_research_cycle_and_dedupe(tmp_path, monkeypatch):
     import numpy as np
     db = str(tmp_path / "fund.db")
-    up = np.linspace(100, 150, 30)
-    down = np.linspace(150, 100, 30)
-    idx = pd.date_range("2025-01-01", periods=120, freq="D", tz="UTC")
-    close = pd.Series(np.concatenate([up, down, up, down]), index=idx)
-    fake = pd.DataFrame({"open": close.shift(1).fillna(100), "high": close + 1,
-                         "low": close - 1, "close": close, "volume": 1000.0},
+    rng = np.random.default_rng(3)
+    segs = [np.linspace(100, 160, 60), np.linspace(160, 130, 40),
+            np.linspace(130, 220, 80), np.linspace(220, 190, 30),
+            np.linspace(190, 280, 90)]
+    close = np.concatenate(segs) * (1 + rng.normal(0, 0.002, 300))
+    idx = pd.date_range("2025-01-01", periods=300, freq="D", tz="UTC")
+    fake = pd.DataFrame({"open": close, "high": close * 1.01,
+                         "low": close * 0.99, "close": close, "volume": 1000.0},
                         index=idx)
     monkeypatch.setattr(research, "generate_hypotheses",
                         lambda phase, n=3: [{"nombre": "g1", "base": "sma_cross",
@@ -130,8 +132,10 @@ def test_run_research_cycle_and_dedupe(tmp_path, monkeypatch):
     out = research.run_research(db_path=db, phase="aggressive")
     assert out["status"] == "ok" and out["tested"] == 1
     assert out["runs"] > 0
+    assert "robustness" in out and out["robustness"]["passed"] is True
     std = research.get_standard(db_path=db)
     assert std is not None and std["base"] == "sma_cross"
+    assert std["status"] == "incubating"  # toda promocion entra a incubadora
     assert std["fingerprint"] in research.known_fingerprints(db)
     out2 = research.run_research(db_path=db, phase="aggressive")
     assert out2["status"] == "sin_specs_nuevas" and out2["tested"] == 0
@@ -151,12 +155,14 @@ def test_run_research_uses_vigente_phase_when_none(tmp_path, monkeypatch):
 def test_run_research_fetches_each_symbol_once(tmp_path, monkeypatch):
     import numpy as np
     db = str(tmp_path / "f.db")
-    idx = pd.date_range("2025-01-01", periods=120, freq="D", tz="UTC")
-    up = np.linspace(100, 150, 30)
-    down = np.linspace(150, 100, 30)
-    close = pd.Series(np.concatenate([up, down, up, down]), index=idx)
-    fake = pd.DataFrame({"open": close.shift(1).fillna(100), "high": close + 1,
-                         "low": close - 1, "close": close, "volume": 1000.0},
+    rng = np.random.default_rng(4)
+    segs = [np.linspace(100, 160, 60), np.linspace(160, 130, 40),
+            np.linspace(130, 220, 80), np.linspace(220, 190, 30),
+            np.linspace(190, 280, 90)]
+    close = np.concatenate(segs) * (1 + rng.normal(0, 0.002, 300))
+    idx = pd.date_range("2025-01-01", periods=300, freq="D", tz="UTC")
+    fake = pd.DataFrame({"open": close, "high": close * 1.01,
+                         "low": close * 0.99, "close": close, "volume": 1000.0},
                         index=idx)
     calls = []
 
@@ -192,12 +198,14 @@ def test_run_research_noconsume_on_sin_datos(tmp_path, monkeypatch):
 def test_run_research_skips_invalid_hypothesis(tmp_path, monkeypatch):
     import numpy as np
     db = str(tmp_path / "e.db")
-    idx = pd.date_range("2025-01-01", periods=120, freq="D", tz="UTC")
-    up = np.linspace(100, 150, 30)
-    down = np.linspace(150, 100, 30)
-    close = pd.Series(np.concatenate([up, down, up, down]), index=idx)
-    fake = pd.DataFrame({"open": close.shift(1).fillna(100), "high": close + 1,
-                         "low": close - 1, "close": close, "volume": 1000.0},
+    rng = np.random.default_rng(5)
+    segs = [np.linspace(100, 160, 60), np.linspace(160, 130, 40),
+            np.linspace(130, 220, 80), np.linspace(220, 190, 30),
+            np.linspace(190, 280, 90)]
+    close = np.concatenate(segs) * (1 + rng.normal(0, 0.002, 300))
+    idx = pd.date_range("2025-01-01", periods=300, freq="D", tz="UTC")
+    fake = pd.DataFrame({"open": close, "high": close * 1.01,
+                         "low": close * 0.99, "close": close, "volume": 1000.0},
                         index=idx)
     monkeypatch.setattr(research, "generate_hypotheses", lambda phase, n=3: [
         {"nombre": "mala", "base": "no_existe", "params": {}},
@@ -229,3 +237,32 @@ def test_run_research_ignores_ineligible(tmp_path, monkeypatch):
     out = research.run_research(db_path=db, phase="aggressive")
     assert out["standard"] is None
     assert research.get_standard(db) is None
+
+
+def test_run_research_rechaza_candidato_no_robusto(tmp_path, monkeypatch):
+    import numpy as np
+    db = str(tmp_path / "r.db")
+    # ruido lateral sin tendencia: cruces constantes que pagan costes -> OOS destructivo
+    rng = np.random.default_rng(11)
+    close = 100 * np.cumprod(1 + rng.normal(0.0, 0.015, 300))
+    idx = pd.date_range("2025-01-01", periods=300, freq="D", tz="UTC")
+    fake = pd.DataFrame({"open": close, "high": close * 1.01,
+                         "low": close * 0.99, "close": close, "volume": 1000.0},
+                        index=idx)
+    research.init_research_db(db)
+    research.set_standard(db, {"fingerprint": "prev", "nombre": "actual",
+                               "base": "donchian_breakout", "status": "standard"})
+    monkeypatch.setattr(research, "generate_hypotheses", lambda phase, n=3: [
+        {"nombre": "v", "base": "sma_cross", "params": {"fast": 5, "slow": 20}}])
+    monkeypatch.setattr(research, "get_ohlc",
+                        lambda sym, period="1y", interval="1d": fake)
+    # elegibilidad forzada: el gate de robustez (backtester real) debe rechazar
+    monkeypatch.setattr(research, "run_backtest", lambda df, sig, cost: {
+        "total_return": 0.3, "annualized": 0.3, "sharpe": 2.0,
+        "max_drawdown": -0.10, "win_rate": 0.7, "profit_factor": 2.0,
+        "n_trades": 8})
+    out = research.run_research(db_path=db, phase="aggressive")
+    assert out["status"] == "sin_candidato_robusto"
+    std = research.get_standard(db)
+    assert std["fingerprint"] == "prev"  # se conserva la estrategia actual
+

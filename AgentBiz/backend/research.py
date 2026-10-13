@@ -8,6 +8,10 @@ import itertools
 from strategies import STRATEGIES, validate_params
 from backtester import run_backtest, _eligible, COSTS
 from market_data import get_ohlc, list_universe
+from robustness import robustness_gate
+
+INCUBATION_DAYS = 30
+INCUBATION_MAX_DD = -0.10
 
 
 def _conn(db_path):
@@ -196,6 +200,71 @@ def get_standard(db_path):
         return None
 
 
+def candidate_robustness(dfs_by_symbol, sig_fn, cost_by_symbol,
+                         min_pass_ratio: float = 0.5):
+    """Gate de robustez del candidato sobre los simbolos evaluados.
+
+    passed si el gate individual (walk-forward + Monte Carlo) pasa en al
+    menos `min_pass_ratio` de los simbolos y el retorno OOS medio no es
+    destructivo. Replica el filtro de robustez del fondo del video.
+    """
+    reports = {}
+    passed_n = 0
+    oos_returns = []
+    for sym, df in dfs_by_symbol.items():
+        cost = cost_by_symbol.get(sym, COSTS["crypto"])
+        g = robustness_gate(df, sig_fn, cost)
+        reports[sym] = g
+        if g["passed"]:
+            passed_n += 1
+        oos_returns.append(g["oos"]["oos_return"])
+    n = len(reports)
+    if n == 0:
+        return {"passed": False, "symbols": 0, "passed_symbols": 0,
+                "mean_oos_return": 0.0, "reports": {}}
+    mean_oos = float(sum(oos_returns) / n)
+    passed = (passed_n / n) >= min_pass_ratio and mean_oos >= 0.0
+    return {"passed": bool(passed), "symbols": n, "passed_symbols": passed_n,
+            "mean_oos_return": round(mean_oos, 6), "reports": reports}
+
+
+def update_incubation(db_path, curve=None):
+    """Gradua (o rechaza) la estrategia en incubacion segun su equity real.
+
+    curve: lista de (ts, equity). Si se omite, se toma del standard payload
+    solo el estado; sin curva no hay graduacion.
+    """
+    std = get_standard(db_path)
+    if not std or std.get("status") != "incubating":
+        return {"status": "sin_incubacion", "standard": std}
+    started = std.get("incubated_at")
+    if not started or curve is None or len(curve) < 2:
+        return {"status": "en_incubacion", "standard": std}
+    started_dt = datetime.datetime.fromisoformat(started)
+    last_dt = datetime.datetime.fromisoformat(curve[-1][0])
+    days = (last_dt - started_dt).total_seconds() / 86400.0
+    if days < INCUBATION_DAYS:
+        return {"status": "en_incubacion", "days": round(days, 2), "standard": std}
+    equities = [e for _, e in curve if e is not None]
+    peak = equities[0]
+    max_dd = 0.0
+    for e in equities:
+        peak = max(peak, e)
+        dd = (e - peak) / peak if peak else 0.0
+        max_dd = min(max_dd, dd)
+    if max_dd >= INCUBATION_MAX_DD:
+        std["status"] = "standard"
+        std["graduated_at"] = _now()
+        set_standard(db_path, std)
+        return {"status": "graduada", "max_drawdown": round(max_dd, 6),
+                "days": round(days, 2), "standard": std}
+    std["status"] = "failed"
+    std["failed_at"] = _now()
+    set_standard(db_path, std)
+    return {"status": "rechazada", "max_drawdown": round(max_dd, 6),
+            "days": round(days, 2), "standard": std}
+
+
 def parse_hypotheses(raw):
     text = (raw or "").strip()
     if "```" in text:
@@ -296,7 +365,7 @@ def run_research(db_path="fund.db", phase=None, period="1y"):
                 m["eligible"] = _eligible(m, phase)
                 record_run(db_path, fp, sym, spec["nombre"], m)
                 results.append({"fp": fp, "nombre": spec["nombre"],
-                                "base": spec["base"], **m})
+                                "base": spec["base"], "symbol": sym, **m})
     by_spec = {}
     for r in results:
         if r["n_trades"] >= 2 and r["eligible"]:
@@ -311,10 +380,43 @@ def run_research(db_path="fund.db", phase=None, period="1y"):
         scored.append((mean_sharpe, mean_ret, fp, rows[0]["nombre"], rows[0]["base"]))
     scored.sort(reverse=True)
     best_sharpe, best_ret, best_fp, best_nombre, best_base = scored[0]
+    # gate de robustez (walk-forward OOS + Monte Carlo) antes de promover
+    rows_best = by_spec[best_fp]
+    best_base_name = rows_best[0]["base"]
+    # reconstruir params desde el fingerprint de new_specs
+    params_best = None
+    for fp_c, concrete in new_specs:
+        if fp_c == best_fp:
+            params_best = concrete["params"]
+            break
+    if params_best is None:
+        params_best = {}
+    try:
+        sig_best = build_signal_fn(best_base_name, params_best)
+    except ValueError:
+        sig_best = None
+    eligible_syms = {r["symbol"] for r in rows_best}
+    dfs_best = {s: dfs[s] for s in eligible_syms if s in dfs}
+    cost_by_sym = {}
+    for market, symbols in universe.items():
+        for s in symbols:
+            cost_by_sym[s] = COSTS.get(market, COSTS["crypto"])
+    robust = (candidate_robustness(dfs_best, sig_best, cost_by_sym)
+              if sig_best is not None else {"passed": False, "symbols": 0,
+                                            "passed_symbols": 0,
+                                            "mean_oos_return": 0.0, "reports": {}})
+    if not robust["passed"]:
+        # NO se promueve: se conserva la estrategia actual (rechazo tipo incubadora)
+        return {"status": "sin_candidato_robusto", "tested": len(new_specs),
+                "runs": len(results), "robustness": {k: v for k, v in robust.items()
+                                                     if k != "reports"},
+                "standard": get_standard(db_path)}
     payload = {"fingerprint": best_fp, "nombre": best_nombre, "base": best_base,
                "score_sharpe": round(best_sharpe, 4),
                "score_return": round(best_ret, 6), "phase": phase,
-               "tested_at": _now(), "runs": len(by_spec[best_fp])}
+               "tested_at": _now(), "runs": len(by_spec[best_fp]),
+               "status": "incubating", "incubated_at": _now(),
+               "robustness": {k: v for k, v in robust.items() if k != "reports"}}
     set_standard(db_path, payload)
     return {"status": "ok", "tested": len(new_specs), "runs": len(results),
-            "standard": payload}
+            "robustness": payload["robustness"], "standard": payload}

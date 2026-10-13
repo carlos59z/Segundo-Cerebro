@@ -239,9 +239,11 @@ async def fund_mark():
                     sync_failed.append(c["symbol"])
                     send_telegram(f"mark: sync broker fallo {c['symbol']}: {e}")
         st = p.get_status()
+        incubation = research.update_incubation(
+            FUND_DB, p.get_equity_curve(limit=10000))
         return {"marked": marked, "open": st["open_positions"],
                 "closed": closed, "failed": failed, "broker_sync_failed": sync_failed,
-                "status": st}
+                "incubation": incubation["status"], "status": st}
     return await asyncio.to_thread(work)
 
 
