@@ -112,6 +112,13 @@ def test_parse_hypotheses_without_json_raises():
         research.parse_hypotheses('{"base": "sma_cross"}')
 
 
+def test_parse_hypotheses_trailing_prose_y_arrays_extra():
+    raw = ('[{"nombre": "a", "base": "sma_cross", "params": {"fast": 5}}] '
+           'Notas: [esto no es un array de specs] y mas texto')
+    specs = research.parse_hypotheses(raw)
+    assert len(specs) == 1 and specs[0]["base"] == "sma_cross"
+
+
 def test_run_research_cycle_and_dedupe(tmp_path, monkeypatch):
     import numpy as np
     db = str(tmp_path / "fund.db")
@@ -125,7 +132,7 @@ def test_run_research_cycle_and_dedupe(tmp_path, monkeypatch):
                          "low": close * 0.99, "close": close, "volume": 1000.0},
                         index=idx)
     monkeypatch.setattr(research, "generate_hypotheses",
-                        lambda phase, n=3: [{"nombre": "g1", "base": "sma_cross",
+                        lambda phase, n=3, db_path=None, **kw: [{"nombre": "g1", "base": "sma_cross",
                                              "grid": {"fast": [5], "slow": [20]}}])
     monkeypatch.setattr(research, "get_ohlc",
                         lambda sym, period="1y", interval="1d": fake)
@@ -146,7 +153,7 @@ def test_run_research_uses_vigente_phase_when_none(tmp_path, monkeypatch):
     research.init_research_db(db)
     research.set_meta(db, "phase", "moderate")
     monkeypatch.setattr(research, "generate_hypotheses",
-                        lambda phase, n=3: (_ for _ in ()).throw(
+                        lambda phase, n=3, db_path=None, **kw: (_ for _ in ()).throw(
                             AssertionError(f"phase={phase}")))
     with pytest.raises(AssertionError, match="phase=moderate"):
         research.run_research(db_path=db, phase=None)
@@ -171,7 +178,7 @@ def test_run_research_fetches_each_symbol_once(tmp_path, monkeypatch):
         return fake
 
     monkeypatch.setattr(research, "generate_hypotheses",
-                        lambda phase, n=3: [{"nombre": "g", "base": "sma_cross",
+                        lambda phase, n=3, db_path=None, **kw: [{"nombre": "g", "base": "sma_cross",
                                              "grid": {"fast": [5, 10], "slow": [20]}}])
     monkeypatch.setattr(research, "get_ohlc", counting)
     out = research.run_research(db_path=db, phase="aggressive")
@@ -183,7 +190,7 @@ def test_run_research_fetches_each_symbol_once(tmp_path, monkeypatch):
 
 def test_run_research_noconsume_on_sin_datos(tmp_path, monkeypatch):
     db = str(tmp_path / "d.db")
-    monkeypatch.setattr(research, "generate_hypotheses", lambda phase, n=3: [
+    monkeypatch.setattr(research, "generate_hypotheses", lambda phase, n=3, db_path=None, **kw: [
         {"nombre": "v", "base": "sma_cross", "params": {"fast": 5, "slow": 20}}])
 
     def boom(sym, period="1y", interval="1d"):
@@ -207,7 +214,7 @@ def test_run_research_skips_invalid_hypothesis(tmp_path, monkeypatch):
     fake = pd.DataFrame({"open": close, "high": close * 1.01,
                          "low": close * 0.99, "close": close, "volume": 1000.0},
                         index=idx)
-    monkeypatch.setattr(research, "generate_hypotheses", lambda phase, n=3: [
+    monkeypatch.setattr(research, "generate_hypotheses", lambda phase, n=3, db_path=None, **kw: [
         {"nombre": "mala", "base": "no_existe", "params": {}},
         {"nombre": "buena", "base": "sma_cross", "params": {"fast": 5, "slow": 20}}])
     monkeypatch.setattr(research, "get_ohlc",
@@ -226,7 +233,7 @@ def test_run_research_ignores_ineligible(tmp_path, monkeypatch):
     fake = pd.DataFrame({"open": close.shift(1).fillna(100), "high": close + 1,
                          "low": close - 1, "close": close, "volume": 1000.0},
                         index=idx)
-    monkeypatch.setattr(research, "generate_hypotheses", lambda phase, n=3: [
+    monkeypatch.setattr(research, "generate_hypotheses", lambda phase, n=3, db_path=None, **kw: [
         {"nombre": "v", "base": "sma_cross", "params": {"fast": 5, "slow": 20}}])
     monkeypatch.setattr(research, "get_ohlc",
                         lambda sym, period="1y", interval="1d": fake)
@@ -252,7 +259,7 @@ def test_run_research_rechaza_candidato_no_robusto(tmp_path, monkeypatch):
     research.init_research_db(db)
     research.set_standard(db, {"fingerprint": "prev", "nombre": "actual",
                                "base": "donchian_breakout", "status": "standard"})
-    monkeypatch.setattr(research, "generate_hypotheses", lambda phase, n=3: [
+    monkeypatch.setattr(research, "generate_hypotheses", lambda phase, n=3, db_path=None, **kw: [
         {"nombre": "v", "base": "sma_cross", "params": {"fast": 5, "slow": 20}}])
     monkeypatch.setattr(research, "get_ohlc",
                         lambda sym, period="1y", interval="1d": fake)
@@ -265,4 +272,5 @@ def test_run_research_rechaza_candidato_no_robusto(tmp_path, monkeypatch):
     assert out["status"] == "sin_candidato_robusto"
     std = research.get_standard(db)
     assert std["fingerprint"] == "prev"  # se conserva la estrategia actual
+
 

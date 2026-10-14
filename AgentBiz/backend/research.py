@@ -279,24 +279,56 @@ def parse_hypotheses(raw):
             text = parts[1]
             if text.startswith("json"):
                 text = text[4:]
-    start = text.find("[")
-    end = text.rfind("]")
-    if start == -1 or end == -1 or end < start:
+    # decodifica el primer array JSON valido (inmune a prosa y arrays extra)
+    decoder = json.JSONDecoder()
+    data = None
+    idx = text.find("[")
+    while idx != -1:
+        try:
+            candidate, _ = decoder.raw_decode(text[idx:])
+        except ValueError:
+            idx = text.find("[", idx + 1)
+            continue
+        if isinstance(candidate, list):
+            data = candidate
+            break
+        idx = text.find("[", idx + 1)
+    if data is None:
         raise ValueError("no se encontro JSON en la respuesta del modelo")
-    try:
-        data = json.loads(text[start:end + 1])
-    except ValueError as e:
-        raise ValueError(f"JSON de hipotesis invalido: {e}")
-    if not isinstance(data, list):
-        raise ValueError("se esperaba una lista de SPECs")
     out = [x for x in data if isinstance(x, dict) and "base" in x]
     if not out:
         raise ValueError("ninguna SPEC valida en la respuesta")
     return out
 
 
-def generate_hypotheses(phase="aggressive", n=3):
+def known_params_summary(db_path, max_vals=15):
+    """Valores ya explorados por base, para empujar al LLM fuera de lo conocido."""
+    c = _conn(db_path)
+    try:
+        rows = c.execute("SELECT base, params_json FROM research_specs").fetchall()
+    finally:
+        c.close()
+    agg = {}
+    for base, pj in rows:
+        try:
+            params = json.loads(pj)
+        except (TypeError, ValueError):
+            continue
+        slot = agg.setdefault(base, {})
+        for k, v in params.items():
+            if isinstance(v, (int, float)):
+                slot.setdefault(k, set()).add(v)
+    parts = []
+    for base, slot in sorted(agg.items()):
+        kv = ", ".join(
+            f"{k}={sorted(vals)[:max_vals]}" for k, vals in sorted(slot.items()))
+        parts.append(f"{base}: {kv}")
+    return "; ".join(parts)
+
+
+def generate_hypotheses(phase="aggressive", n=3, db_path="fund.db"):
     from agents.ai_brain import ask_nvidia_sync, AGENT_SYSTEM_PROMPTS
+    explored = known_params_summary(db_path)
     prompt = (
         f"Genera {n} hipotesis de estrategias para el fondo en fase {phase}. "
         "Responde SOLO con un array JSON, sin texto fuera del array. Cada elemento: "
@@ -306,7 +338,9 @@ def generate_hypotheses(phase="aggressive", n=3):
         "macd_trend, bollinger_reversion. "
         "Parametros validos: sma_cross: fast, slow; rsi_reversion: period, oversold, overbought; "
         "momentum_30d: window, threshold; donchian_breakout: channel, atr_period; "
-        "macd_trend: fast, slow, signal_period; bollinger_reversion: window, devs."
+        "macd_trend: fast, slow, signal_period; bollinger_reversion: window, devs. "
+        "IMPORTANTE: ya se exploraron estos valores (NO los repitas, propone valores "
+        f"diferentes y racionales): {explored}"
     )
     raw = ask_nvidia_sync(prompt, system=AGENT_SYSTEM_PROMPTS["analytics"],
                           temperature=0.6, max_tokens=1500, agent_id="analytics")
@@ -348,7 +382,8 @@ def run_research(db_path="fund.db", phase=None, period="1y",
         phase = get_meta(db_path, "phase", "aggressive")
         if phase not in ("aggressive", "moderate"):
             phase = "aggressive"
-    hypotheses = specs if specs is not None else generate_hypotheses(phase)
+    hypotheses = specs if specs is not None else generate_hypotheses(
+        phase, db_path=db_path)
     if refresh_days > 0:
         known_ages = known_fingerprints(db_path, with_age=True)
         cutoff = (datetime.datetime.now(datetime.timezone.utc)

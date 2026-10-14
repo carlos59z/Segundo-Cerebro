@@ -34,7 +34,7 @@ def test_run_research_acepta_specs_explicitas_sin_llm(tmp_path, monkeypatch):
                         lambda sym, period="1y", interval="1d": fake)
     # el LLM no debe tocarse: si se llama, el test falla
     monkeypatch.setattr(research, "generate_hypotheses",
-                        lambda phase, n=3: (_ for _ in ()).throw(
+                        lambda phase, n=3, db_path=None, **kw: (_ for _ in ()).throw(
                             AssertionError("no debe usar LLM en mineria")))
     specs = [{"nombre": "mineria sma", "base": "sma_cross",
               "grid": {"fast": [5], "slow": [20]}}]
@@ -49,7 +49,7 @@ def test_mine_refresh_retestea_specs_viejas(tmp_path, monkeypatch):
     monkeypatch.setattr(research, "get_ohlc",
                         lambda sym, period="1y", interval="1d": fake)
     monkeypatch.setattr(research, "generate_hypotheses",
-                        lambda phase, n=3: (_ for _ in ()).throw(
+                        lambda phase, n=3, db_path=None, **kw: (_ for _ in ()).throw(
                             AssertionError("no LLM")))
     specs = [{"nombre": "mineria sma", "base": "sma_cross",
               "grid": {"fast": [5], "slow": [20]}}]
@@ -80,3 +80,16 @@ def test_known_fingerprints_con_edad(tmp_path):
     ages = research.known_fingerprints(db, with_age=True)
     assert fp in ages
     assert "created_at" in ages[fp]
+
+
+def test_known_params_summary_agrega_valores(tmp_path):
+    db = str(tmp_path / "sum.db")
+    research.init_research_db(db)
+    research.save_spec(db, "sma_cross", {"fast": 5, "slow": 20}, "a", "aggressive")
+    research.save_spec(db, "sma_cross", {"fast": 8, "slow": 30}, "b", "aggressive")
+    research.save_spec(db, "macd_trend", {"fast": 12, "slow": 26,
+                                          "signal_period": 9}, "c", "aggressive")
+    s = research.known_params_summary(db)
+    assert "sma_cross" in s and "macd_trend" in s
+    assert "fast=[5" in s and "8" in s  # ambos fasts presentes
+    assert "signal_period=[9]" in s

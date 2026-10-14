@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -95,7 +95,9 @@ def test_usa_cache_si_fetch_falla():
 
 def test_calendar_endpoint(client, monkeypatch):
     import econ_calendar as ec_mod
-    events = [_ev("CPI y/y", "USD", "2026-10-14T08:30:00-04:00", "High")]
+    # fecha relativa: un evento High en el futuro, inmune al reloj real
+    future = (datetime.now(timezone.utc) + timedelta(hours=12)).isoformat()
+    events = [_ev("CPI y/y", "USD", future, "High")]
     # la ruta real de otros tests puede haber calentado el cache global
     ec_mod._default_cache["events"] = None
     ec_mod._default_cache["ts"] = None
