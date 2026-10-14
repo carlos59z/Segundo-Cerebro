@@ -41,6 +41,25 @@ pruebas: `%TEMP%\fund_backup_premineria.db`.
 - **El feed ForexFactory es estable y sin key**; caché 6h en memoria,
   fetcher inyectable para tests.
 
+## Experimento régimen ER (2026-10-14, lección registrada)
+
+Se probó un filtro de régimen (efficiency ratio Kaufman 20 > 0.3) sobre
+Donchian(20) con walk-forward OOS en los 31 símbolos. La primera versión
+mostraba +40.9% OOS medio (vs +15.6% base) — **era un artefacto de lookahead**:
+el mask usaba el cierre del día t para decidir la posición que capturaba
+el return de t. Con la corrección legal (mask shift(1), decisión en t-1):
+
+| Versión | Total medio/símbolo | % positivos |
+|---|---|---|
+| Donchian(20) base | +15.6% | 52% |
+| + ER shift(1) | +10.8% | 61% |
+
+Conclusión: el filtro ER **no se integra**; el estándar sigue Donchian(20)
+sin cambios. `backend/regime.py` queda disponible (testeado, sin leak) para
+futuros experimentos. Lección: todo experimento de señales debe usar la misma
+convención de ejecución (shift(1)) que el backtester de producción, o los
+resultados mienten.
+
 ## Próximos pasos
 
 1. Graduación de Donchian(20) el ~12-nov (revisar `/mark` → `incubation`).
