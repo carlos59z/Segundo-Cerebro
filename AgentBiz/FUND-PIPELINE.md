@@ -3,7 +3,7 @@
 Registro de la construcción y primeras pruebas reales del pipeline de estrategias
 del fondo paper ($2,500), replicando el sistema del video de Vicente Conesa Santos.
 
-## Componentes (todos con tests, suite 231/231)
+## Componentes (todos con tests, suite 236/236)
 
 | Componente | Archivo | Commit | Qué hace |
 |---|---|---|---|
@@ -84,6 +84,25 @@ sin cambios. `backend/regime.py` queda disponible (testeado, sin leak) para
 futuros experimentos. Lección: todo experimento de señales debe usar la misma
 convención de ejecución (shift(1)) que el backtester de producción, o los
 resultados mienten.
+
+## Lección live "El Gafa" yABT6xa7oWQ (2026-10-15) — aplicada a Binance Futures
+
+Metodología "Liquidator" (cuenta $100, +4.36% sesión) — traducida a nuestro
+stack con `cfb32df` (suite 236/236):
+
+| Lección del live | Implementación | Estado |
+|---|---|---|
+| Funding rate check antes de abrir (no pagar funding alto en contra) | `auto_trader.funding_ok(side, rate)` — long rechaza si `rate > +0.05%`, short si `rate < -0.05%`; fetch público `GET /fapi/v1/premiumIndex` en `broker_binance.funding_rate()` | hecho |
+| Sin volumen = capital atrapado (rechazó MANA por 0 volumen) | `operation_to_order` filtra `quote_volume < $50M` (24h, futuros) vía `GET /fapi/v1/ticker/24hr` | hecho |
+| SL = liquidación + buffer (su apalancamiento lo calibra para que liq quede tras el SL) | `auto_trader.liq_behind_stop(entry, stop, side, lev)` — verifica que la liquidación aproximada (~`1/lev - mmr`) queda **más allá** del SL; si no, rechaza la orden | hecho (seguro: con PHASES actuales lev×dist ≤ mid < 1 siempre pasa) |
+| Sizing `margen = cuenta × risk% / distancia_stop` | ya lo hace `size_order` (pérdida determinística en el SL = equity × mid) | ya estaba |
+| Solo capital arriesgado en la wallet de trading | N/A en paper (todo el equity es el banco); aplica cuando haya real | pendiente real |
+| 1 posición a la vez, bias HTF + entrada LTF, órdenes limit | decisión de fase (aggressive=5); HTF/LTF es trabajo del Trader API | fuera de alcance de este commit |
+
+**Caveat honesto**: la técnica "liquidación como stop único" del live tiene
+defectos (funding mueve el precio de liquidación, mark price en wicks). Nosotros
+usamos SL reduceOnly en Binance **más** el check `liq_behind_stop` como red de
+seguridad; no adoptamos liq-como-stop como estrategia primaria.
 
 ## Próximos pasos
 
