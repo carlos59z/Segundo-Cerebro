@@ -5,7 +5,15 @@ import pandas as pd
 COSTS = {"crypto": 0.0006, "stocks": 0.0001, "etf": 0.0001, "futures": 0.0001, "forex": 0.000015}
 
 
-def run_backtest(df: pd.DataFrame, signals: pd.Series, cost_rate: float) -> dict:
+def run_backtest(df: pd.DataFrame, signals: pd.Series, cost_rate: float,
+                 warmup: int = 0) -> dict:
+    if warmup < 0:
+        raise ValueError("warmup no puede ser negativo")
+    if warmup >= len(df):
+        raise ValueError(f"warmup ({warmup}) >= barras disponibles ({len(df)})")
+    if warmup:
+        df = df.iloc[warmup:]
+        signals = signals.iloc[warmup:]
     close = df["close"].astype(float)
     pos = signals.reindex(close.index).fillna(0)
     ret = close.pct_change().fillna(0)
@@ -70,7 +78,7 @@ def _eligible(m: dict, phase: str) -> bool:
 
 def rank_universe(phase: str = "aggressive", period: str = "1y") -> list[dict]:
     from market_data import list_universe, get_ohlc
-    from strategies import STRATEGIES
+    from strategies import STRATEGIES, warmup_bars
     rows = []
     for market, symbols in list_universe().items():
         cost = COSTS.get(market, COSTS["crypto"])
@@ -81,7 +89,7 @@ def rank_universe(phase: str = "aggressive", period: str = "1y") -> list[dict]:
                 continue
             for name, fn in STRATEGIES.items():
                 try:
-                    m = run_backtest(df, fn(df), cost)
+                    m = run_backtest(df, fn(df), cost, warmup=warmup_bars(name))
                 except Exception:
                     continue
                 m.update({"symbol": sym, "market": market, "strategy": name,

@@ -64,6 +64,15 @@ def test_build_signal_fn_uses_params():
         research.build_signal_fn("sma_cross", {"foo": 1})
 
 
+def test_warmup_bars_por_estrategia():
+    assert st.warmup_bars("donchian_breakout", {"channel": 20, "atr_period": 14}) == 21
+    assert st.warmup_bars("sma_cross", {}) == 51
+    assert st.warmup_bars("bollinger_reversion", {"window": 15}) == 16
+    assert st.warmup_bars("macd_trend", {"fast": 12, "slow": 26, "signal_period": 9}) == 36
+    with pytest.raises(ValueError):
+        st.warmup_bars("no_existe", {})
+
+
 def test_save_spec_dedupe_and_history(db):
     fp = research.save_spec(db, "sma_cross", {"fast": 5}, "v1", "aggressive")
     fp2 = research.save_spec(db, "sma_cross", {"fast": 5}, "v1 otra vez", "aggressive")
@@ -237,7 +246,7 @@ def test_run_research_ignores_ineligible(tmp_path, monkeypatch):
         {"nombre": "v", "base": "sma_cross", "params": {"fast": 5, "slow": 20}}])
     monkeypatch.setattr(research, "get_ohlc",
                         lambda sym, period="1y", interval="1d": fake)
-    monkeypatch.setattr(research, "run_backtest", lambda df, sig, cost: {
+    monkeypatch.setattr(research, "run_backtest", lambda df, sig, cost, **kw: {
         "total_return": 0.5, "annualized": 0.5, "sharpe": 3.0,
         "max_drawdown": -0.9, "win_rate": 0.9, "profit_factor": 9.0,
         "n_trades": 10})
@@ -264,7 +273,7 @@ def test_run_research_rechaza_candidato_no_robusto(tmp_path, monkeypatch):
     monkeypatch.setattr(research, "get_ohlc",
                         lambda sym, period="1y", interval="1d": fake)
     # elegibilidad forzada: el gate de robustez (backtester real) debe rechazar
-    monkeypatch.setattr(research, "run_backtest", lambda df, sig, cost: {
+    monkeypatch.setattr(research, "run_backtest", lambda df, sig, cost, **kw: {
         "total_return": 0.3, "annualized": 0.3, "sharpe": 2.0,
         "max_drawdown": -0.10, "win_rate": 0.7, "profit_factor": 2.0,
         "n_trades": 8})

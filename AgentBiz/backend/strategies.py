@@ -97,3 +97,25 @@ def validate_params(base, params):
     if base == "rsi_reversion" and casted.get("oversold", 30) >= casted.get("overbought", 70):
         raise ValueError("rsi_reversion: oversold debe ser menor que overbought")
     return casted
+
+
+def warmup_bars(base: str, params: dict | None = None) -> int:
+    """Barras iniciales a descartar: el indicador aun no tiene historia suficiente.
+
+    Equivalente al setWarmUp/isReady de QuantConnect: sin esto las metricas
+    incluyen barras con senal vacia o rolling inmaduro (leccion ep. indicadores).
+    """
+    p = dict(params or {})
+    if base == "sma_cross":
+        return int(p.get("slow", 50)) + 1
+    if base == "rsi_reversion":
+        return int(p.get("period", 14)) + 1
+    if base == "momentum_30d":
+        return int(p.get("window", 30)) + 1
+    if base == "donchian_breakout":
+        return max(int(p.get("channel", 20)), int(p.get("atr_period", 14))) + 1
+    if base == "macd_trend":
+        return int(p.get("slow", 26)) + int(p.get("signal_period", 9)) + 1
+    if base == "bollinger_reversion":
+        return int(p.get("window", 20)) + 1
+    raise ValueError(f"estrategia base desconocida: {base}")

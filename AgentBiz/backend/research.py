@@ -5,7 +5,7 @@ import sqlite3
 import datetime
 import itertools
 
-from strategies import STRATEGIES, validate_params
+from strategies import STRATEGIES, validate_params, warmup_bars
 from backtester import run_backtest, _eligible, COSTS
 from market_data import get_ohlc, list_universe
 from robustness import robustness_gate
@@ -213,6 +213,9 @@ def candidate_robustness(dfs_by_symbol, sig_fn, cost_by_symbol,
     passed si el gate individual (walk-forward + Monte Carlo) pasa en al
     menos `min_pass_ratio` de los simbolos y el retorno OOS medio no es
     destructivo. Replica el filtro de robustez del fondo del video.
+    Sin warmup aqui: cada ventana OOS del walk-forward ya es un backtest
+    independiente con rolling local (conservador), y recortar el inicio
+    reduciria ventanas en series cortas.
     """
     reports = {}
     passed_n = 0
@@ -446,7 +449,8 @@ def run_research(db_path="fund.db", phase=None, period="1y",
                 if df is None:
                     continue
                 try:
-                    m = run_backtest(df, sig_fn(df), cost)
+                    m = run_backtest(df, sig_fn(df), cost,
+                                     warmup=warmup_bars(spec["base"], spec["params"]))
                 except Exception:
                     continue
                 m["eligible"] = _eligible(m, phase)

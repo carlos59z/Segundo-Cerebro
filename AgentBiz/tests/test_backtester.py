@@ -66,6 +66,26 @@ def test_rank_universe_smoke():
     assert all("sharpe" in r and "eligible" in r for r in rows[:10])
 
 
+def test_warmup_equals_slicing_df():
+    closes = np.linspace(100, 150, 80)
+    df = _df(closes)
+    sig = pd.Series(1, index=df.index)
+    warm = bt.run_backtest(df, sig, 0.0, warmup=30)
+    trimmed = bt.run_backtest(df.iloc[30:], sig.iloc[30:], 0.0)
+    assert warm == trimmed
+    # el warmup descarta la subida inicial: retorno total menor que sin cortar
+    assert warm["total_return"] < bt.run_backtest(df, sig, 0.0)["total_return"]
+
+
+def test_warmup_invalid_raises():
+    df = _df(np.full(10, 100.0))
+    sig = pd.Series(0, index=df.index)
+    with pytest.raises(ValueError):
+        bt.run_backtest(df, sig, 0.0, warmup=10)
+    with pytest.raises(ValueError):
+        bt.run_backtest(df, sig, 0.0, warmup=-1)
+
+
 def test_win_rate_per_round_trip():
     closes = np.array([100.0, 100.0, 99.0, 101.0, 101.0])
     df = _df(closes)

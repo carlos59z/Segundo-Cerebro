@@ -3,7 +3,7 @@
 Registro de la construcción y primeras pruebas reales del pipeline de estrategias
 del fondo paper ($2,500), replicando el sistema del video de Vicente Conesa Santos.
 
-## Componentes (todos con tests, suite 220/220)
+## Componentes (todos con tests, suite 231/231)
 
 | Componente | Archivo | Commit | Qué hace |
 |---|---|---|---|
@@ -40,6 +40,31 @@ pruebas: `%TEMP%\fund_backup_premineria.db`.
   repetía hipótesis ya cubiertas. Ahora el prompt lo evita.
 - **El feed ForexFactory es estable y sin key**; caché 6h en memoria,
   fetcher inyectable para tests.
+- **Warmup de indicadores (2026-10-14, lección curso QuantConnect)** —
+  QC se niega a usar un indicador hasta que `isReady` (`setWarmUp`). Nuestro
+  backtester incluía las primeras barras con rolling inmaduro y señal vacía
+  en las métricas. Ahora `warmup_bars(base, params)` en `strategies.py`
+  descarta el inicio en `run_backtest` (mine + `rank_universe`). El gate
+  walk-forward **no** lo usa: cada ventana OOS ya es un backtest independiente
+  con rolling local (conservador) y recortar reduciría ventanas en series
+  cortas. Impacto: métricas in-sample más honestas; ranking de specs puede
+  cambiar levemente en la próxima re-minería (refresh ~28-oct).
+
+## Curso QuantConnect (19 videos, 2026-10-14) — mapeo a nuestro stack
+
+Ya replicamos todo el pipeline del video de Conesa. El curso de QC confirma
+patrones y aporta lecciones trasladables (somos Python/pandas/sqlite, no QC):
+
+| Concepto QC | Equivalente nuestro | Acción |
+|---|---|---|
+| market/stop/limit orders, update/cancel (OCO) | órdenes Binance reduceOnly SL/TP | hecho; trailing/SL-breakeven = futuro |
+| indicators + `isReady`/`setWarmUp` | rolling pandas sin corte | **aplicado** (warmup_bars) |
+| scheduled events | n8n + auto_trader | hecho |
+| universe por volumen (top N) | `list_universe()` estático 31 | idea: ranking por liquidez |
+| filtros fundamentales (PER) | N/A (cripto-heavy) | descartado por ahora |
+| custom data (AddData) | `market_cache.db` | idea: funding rate / OI Binance |
+| redes neuronales (TF) entrenando en live | LLM solo propone specs | lección: el curso logró +0.6% con NN vs +476% buy&hold de TSLA — la NN de precios no es magia; nuestro uso (hipótesis LLM + gate) es más honesto |
+| Twitter bot (VADER sentiment, +52% 5a vs TSLA +476%) | — | lección: sentimiento social solo no basta; no perseguir |
 
 ## Experimento régimen ER (2026-10-14, lección registrada)
 

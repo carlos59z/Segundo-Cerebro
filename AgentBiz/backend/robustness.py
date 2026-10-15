@@ -10,7 +10,12 @@ import pandas as pd
 
 def walk_forward(df: pd.DataFrame, sig_fn, cost: float,
                  train: int = 180, test: int = 60) -> dict:
-    """Ventanas OOS sin solape: entrena en `train` barras, evalua en `test`."""
+    """Ventanas OOS sin solape: entrena en `train` barras, evalua en `test`.
+
+    Sin warmup: cada ventana es un backtest independiente con rolling local
+    (senal 0 al inicio de la ventana = conservador); cortar el inicio global
+    reduciria el numero de ventanas en series cortas.
+    """
     from backtester import run_backtest
     rets, bhs, sharpes = [], [], []
     start = 0
