@@ -72,6 +72,66 @@ def test_operation_to_order_builds_full_body():
                      "strategy": "auto", "market_type": "spot", "review": True}
 
 
+def test_funding_ok_por_lado():
+    # long paga cuando el funding es positivo; umbral 0.05%/8h
+    assert at.funding_ok("long", 0.0004) is True
+    assert at.funding_ok("long", 0.0006) is False
+    # short paga cuando el funding es negativo
+    assert at.funding_ok("short", -0.0004) is True
+    assert at.funding_ok("short", -0.0006) is False
+    assert at.funding_ok("short", 0.0004) is True
+    assert at.funding_ok("short", 0.0007) is True
+
+
+def test_liq_behind_stop():
+    # lev 5, stop 7.5%: liq ~19.6% mas alla del SL -> ok (SL dispara primero)
+    assert at.liq_behind_stop(100.0, 92.5, "long", 5.0) is True
+    # lev 50 con stop 3%: liq ~1.6% ANTES del SL -> rechazar
+    assert at.liq_behind_stop(100.0, 97.0, "long", 50.0) is False
+    assert at.liq_behind_stop(100.0, 103.0, "short", 50.0) is False
+    assert at.liq_behind_stop(100.0, 103.0, "short", 5.0) is True
+
+
+def test_operation_to_order_rechaza_funding_en_contra():
+    op = _op("BUY")
+    op["stop_loss"] = {"price": 92.5}
+    # long con funding fuerte positivo (paga long): rechazar
+    assert at.operation_to_order(op, "BTC", "aggressive", "futures", 2500.0,
+                                 funding=0.0008) is None
+    assert at.operation_to_order(op, "BTC", "aggressive", "futures", 2500.0,
+                                 funding=0.0004) is not None
+    # short con funding fuerte negativo (paga short): rechazar
+    op_s = _op("SELL")
+    op_s["stop_loss"] = {"price": 107.5}
+    assert at.operation_to_order(op_s, "BTC", "aggressive", "futures", 2500.0,
+                                 funding=-0.0008) is None
+    assert at.operation_to_order(op_s, "BTC", "aggressive", "futures", 2500.0,
+                                 funding=-0.0004) is not None
+    # spot: el funding no aplica, se ignora
+    assert at.operation_to_order(op, "BTC", "aggressive", "spot", 2500.0,
+                                 funding=0.0008) is not None
+
+
+def test_operation_to_order_rechaza_volumen_bajo():
+    op = _op("BUY")
+    op["stop_loss"] = {"price": 92.5}
+    # sin volumen (live: moneda muerta = capital atrapado)
+    assert at.operation_to_order(op, "BTC", "aggressive", "futures", 2500.0,
+                                 quote_volume=1_000_000.0) is None
+    assert at.operation_to_order(op, "BTC", "aggressive", "futures", 2500.0,
+                                 quote_volume=80_000_000.0) is not None
+
+
+def test_operation_to_order_rechaza_liq_antes_de_sl():
+    # seguro: si la liquidación quedaría antes que el SL, rechazar
+    op = _op("BUY")
+    op["entry_price"] = 100.0
+    op["stop_loss"] = {"price": 97.0}  # stop 3%
+    # leverage máximo del fit (5) → liq ~19.6% > 3%: pasa
+    assert at.operation_to_order(op, "BTC", "aggressive", "futures", 2500.0) is not None
+
+
+
 import asyncio
 from fastapi import HTTPException
 

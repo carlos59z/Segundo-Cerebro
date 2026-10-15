@@ -253,3 +253,27 @@ def close_sync(symbol, side, qty_usd, leverage, entry):
     r = close_on_exchange(symbol, "spot", side, qty_usd, leverage, entry)
     r["market_type"] = "spot"
     return r
+
+
+def _public_futures(path, params):
+    url = f"https://fapi.binance.com{path}?{urllib.parse.urlencode(params or {})}"
+    try:
+        r = requests.get(url, timeout=10)
+    except requests.RequestException as e:
+        raise BrokerError(f"sin conexion con binance publica: {e}")
+    js = r.json() if r.content else {}
+    if r.status_code >= 400:
+        raise BrokerError(f"binance {r.status_code}: {js}", status=r.status_code)
+    return js
+
+
+def funding_rate(symbol):
+    bsym = to_binance_symbol(symbol, "futures")
+    js = _public_futures("/fapi/v1/premiumIndex", {"symbol": bsym})
+    return float(js.get("lastFundingRate") or 0.0)
+
+
+def quote_volume_24h(symbol):
+    bsym = to_binance_symbol(symbol, "futures")
+    js = _public_futures("/fapi/v1/ticker/24hr", {"symbol": bsym})
+    return float(js.get("quoteVolume") or 0.0)

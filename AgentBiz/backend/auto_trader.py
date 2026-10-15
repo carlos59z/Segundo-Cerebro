@@ -8,7 +8,7 @@ import requests
 
 import research
 from agents.ai_brain import TRADER_API
-from broker_binance import execution_mode, to_binance_symbol
+from broker_binance import execution_mode, funding_rate, quote_volume_24h, to_binance_symbol
 from notify import send_telegram
 from paper_portfolio import PHASES, Portfolio
 
@@ -68,6 +68,24 @@ def size_order(equity, entry, stop_loss, leverage, phase):
     return round(min(qty, equity * 0.5), 2)
 
 
+FUNDING_MAX = 0.0005
+MIN_QUOTE_VOLUME = 50_000_000.0
+MAINT_MARGIN = 0.004
+
+
+def funding_ok(side, rate, threshold=FUNDING_MAX):
+    if side == "long":
+        return rate <= threshold
+    return rate >= -threshold
+
+
+def liq_behind_stop(entry, stop_loss, side, leverage,
+                    buffer=0.0, maint_margin=MAINT_MARGIN):
+    stop_dist = abs(entry - stop_loss) / entry
+    liq_dist = 1.0 / leverage - maint_margin
+    return liq_dist >= stop_dist + buffer
+
+
 def get_operation(symbol, interval="1h"):
     bsym = to_binance_symbol(symbol, "futures")
     try:
@@ -81,7 +99,8 @@ def get_operation(symbol, interval="1h"):
         return None
 
 
-def operation_to_order(op, symbol, phase, market_type, equity):
+def operation_to_order(op, symbol, phase, market_type, equity,
+                       funding=None, quote_volume=None):
     if not op:
         return None
     signal = op.get("signal")
@@ -93,6 +112,11 @@ def operation_to_order(op, symbol, phase, market_type, equity):
         return None
     if market_type == "spot" and side == "short":
         return None
+    if market_type == "futures":
+        if funding is not None and not funding_ok(side, funding):
+            return None
+        if quote_volume is not None and quote_volume < MIN_QUOTE_VOLUME:
+            return None
     entry = float(op["entry_price"])
     stop_loss = float(op["stop_loss"]["price"])
     take_profit = float(op["take_profit_1"]["price"])
@@ -100,6 +124,9 @@ def operation_to_order(op, symbol, phase, market_type, equity):
     if not fit:
         return None
     leverage, stop_loss = fit
+    if market_type == "futures" and not liq_behind_stop(entry, stop_loss,
+                                                        side, leverage):
+        return None
     qty_usd = size_order(equity, entry, stop_loss, leverage, phase)
     if qty_usd <= 0:
         return None
@@ -130,12 +157,24 @@ async def tick():
     open_symbols = {x["symbol"] for x in p.get_positions("open")}
     results = research.latest_results(fmod.FUND_DB, 20)
     cands = select_candidates(results, open_symbols, COOLDOWN, time.time())
+    mt = market_type()
     for c in cands:
         if summary["ordered"] >= 1:
             break
         op = await asyncio.to_thread(get_operation, c["symbol"])
-        body = operation_to_order(op, c["symbol"], p.phase, market_type(),
-                                  st["equity"])
+        funding = vol = None
+        if mt == "futures":
+            try:
+                funding = await asyncio.to_thread(funding_rate, c["symbol"])
+            except Exception as e:
+                log.warning("funding fallo %s: %s", c["symbol"], e)
+            try:
+                vol = await asyncio.to_thread(quote_volume_24h, c["symbol"])
+            except Exception as e:
+                log.warning("volumen fallo %s: %s", c["symbol"], e)
+        body = operation_to_order(op, c["symbol"], p.phase, mt,
+                                  st["equity"], funding=funding,
+                                  quote_volume=vol)
         if not body:
             summary["skipped"] += 1
             continue
