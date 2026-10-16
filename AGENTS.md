@@ -78,3 +78,5 @@ robustez, no la filosofía de founder).
 - Preferir MCP graph tools sobre grep cuando el índice cubra el path.
 - PowerShell 5.1: sin `&`; Python en `C:\Python313\python.exe` con `PYTHONUTF8=1`.
 - Push al fork `carlos59z/Segundo-Cerebro` solo con aprobación; PRs pequeños.
+  `carlos59z` es el remoto `fork` y el repo canónico (2026-10-15); `Daxin7`
+  quedó obsoleto y su remoto `origin` fue eliminado.

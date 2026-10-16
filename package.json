@@ -1,0 +1,25 @@
+{
+  "dependencies": {
+    "@playwright/mcp": "github:microsoft/playwright-mcp",
+    "playwright": "^1.63.0"
+  },
+  "name": "segundo-cerebro",
+  "version": "1.0.0",
+  "description": "![](images/Portada.png)",
+  "main": "open-youtube.js",
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/carlos59z/Segundo-Cerebro.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/carlos59z/Segundo-Cerebro/issues"
+  },
+  "homepage": "https://github.com/carlos59z/Segundo-Cerebro#readme"
+}

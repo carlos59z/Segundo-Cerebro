@@ -162,7 +162,7 @@ https://obsidian.md/
 Lo ideal es ubicarse en el `Escritorio` y abrir en **PowerShell** para clonar el repositorio ahí, esto con el fin de mantener un orden.
 
 ```bash
-git clone https://github.com/Daxin7/Segundo-Cerebro.git
+git clone https://github.com/carlos59z/Segundo-Cerebro.git
 ```
 
 ### 6. Abre la carpeta como vault en Obsidian
