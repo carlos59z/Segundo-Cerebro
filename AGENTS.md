@@ -18,6 +18,9 @@ produzcan dinero y ahorrarle tiempo, con ingeniería disciplinada.
    backoffice PDF; Fase 3 completa, pendiente: minors, deploy, backups.
 3. **AgentBiz** — oficina de agentes (trading AI, Viking memoria, auto-trader
    paper, n8n). Base tecnológica común del portafolio.
+4. **Agencia de automatización IA + marca** (nuevo 2026-10-15) — plan maestro
+   `docs/superpowers/plans/2026-10-15-ingreso-extra-agencia-ia.md`
+   (pilotos gratis → primeros clientes → SaaS del portal como vertical).
 
 ## Reglas de honestidad (no negociables)
 - Trading: cero promesas de ganancias. Capital real solo tras evidencia
