@@ -21,6 +21,12 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(mdb, "DB_PATH", str(tmp_path / "agents.db"))
     import api.fund as fmod
     monkeypatch.setattr(fmod, "FUND_DB", str(tmp_path / "fund.db"))
+    # Hermetico: sin eventos del calendario real, un evento High de hoy
+    # bloquearia aperturas y romperia la suite (dependencia del reloj).
+    # El gate se prueba aparte con eventos sinteticos (test_fund_calendar).
+    import econ_calendar
+    monkeypatch.setattr(econ_calendar, "blocked_reason",
+                        lambda symbol, **kw: None)
     from fastapi.testclient import TestClient
     from api.main import app
     with TestClient(app) as c:
