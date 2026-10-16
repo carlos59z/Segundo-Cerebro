@@ -49,3 +49,35 @@ y manda el reporte semanal sin que nadie lo copie y pegue.
   plantillas.
 - Si una petición es inviable con la operación actual, se dice en el
   diagnóstico, no después de cobrar.
+
+## Cumplimiento y riesgos legales (mitigaciones)
+
+**Límite honesto:** esto es un checklist de mitigación, no asesoría legal.
+El contrato con el primer cliente se revisa con un abogado venezolano
+antes de firmar (costo bajo; se paga con el primer build).
+
+1. **Términos de WhatsApp / Meta** — solo se automatiza con la **API
+   oficial de WhatsApp Business** (vía BSP autorizado: 360dialog, Twilio,
+   etc.). Los bots sobre WhatsApp Web no oficial (whatsapp-web.js,
+   Baileys, etc.) violan los términos de Meta y exponen al cliente a
+   baneo del número — no se ofrecen, aunque el cliente los pida.
+   Escrito en contrato: riesgo de baneo por canales no oficiales es del
+   cliente si insiste.
+2. **Datos personales** — el agente maneja datos de los clientes finales
+   del PYME (nombres, números, contenido de chats). Contrato incluye:
+   tratamiento solo para el fin acordado, confidencialidad, y
+   responsabilidad del PYME de tener base legal para tratar esos datos
+   (Ley de Protección de Datos Personales de Venezuela). Nosotros no
+   revendemos ni usamos esos datos para nada más.
+3. **Responsabilidad limitada** — el agente ejecuta operaciones
+   definidas; no sustituye asesoría profesional (legal, médica,
+   financiera). Errores de automatización: remedio = fix en 48h dentro
+   del retainer; daño directo indemnizado hasta el monto pagado por el
+   servicio (cláusula estándar a firmar con el cliente).
+4. **Publicidad** — el copy de venta (landing, posts) pasa el test de
+   honestidad antes de publicarse: sin "garantizado", sin porcentajes de
+   resultado inventados.
+5. **Propiedad intelectual del build** — el cliente paga el build y
+   recibe los workflows y configuración; la metodología y componentes
+   reutilizables de Segundo Cerebro se licencian de vuelta (cláusula
+   estándar) para poder mantenerlo sin depender de un solo proveedor.
