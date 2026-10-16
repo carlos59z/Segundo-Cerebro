@@ -63,9 +63,12 @@ en mano (Task 3).
 
 **Steps:**
 - [x] Escribir `oferta-agencia.md` con los 3 tiers y 3 casos de uso (retail, servicios, agencias).
-- [x] Landing de 1 página: problema → solución → proceso (diagnóstico→build→retainer) → contacto WhatsApp (`AgentBiz/landing/index.html`, estática sin build — placeholder `wa.me/58XXXXXXXXXX` pendiente de número real).
-- [ ] Publicar landing (GitHub Pages del fork carlos59z) + probar en móvil — pendiente de push aprobado.
-- [ ] Commit + push (push pendiente de aprobación).
+- [x] Landing de 1 página: problema → solución → proceso (diagnóstico→build→retainer) → contacto WhatsApp (`AgentBiz/landing/index.html`, estática sin build — número real +584146703419).
+- [x] Política de privacidad (`AgentBiz/landing/privacidad.html`) + mitigaciones legales en oferta.
+- [x] Publicar landing — **https://carlos59z.github.io/Segundo-Cerebro/** (GitHub Pages, rama `gh-pages` con `.nojekyll`, HTTP 200 verificado en móvil y desktop; CTAs a `wa.me/584146703419`).
+- [x] Commit + push (main: `0faa750`, `ad47d19`, `df18e44`; gh-pages: `412ee9c`, `d80a4f6`).
+
+**Hecho cuando:** URL pública responde 200 ✅ y el mensaje pasa el test de honestidad ✅ (sin "garantizado/gana"; los matches son en negación).
 
 **Hecho cuando:** URL pública responde 200 y el mensaje pasa el test de honestidad (sin palabras tipo "garantizado/gana").
 
