@@ -31,16 +31,21 @@
 
 ### Task 0: Canal tiempo-sensible — Startup Venezuela Summit (21-23 oct 2026, Caracas)
 
-**Decision de Carlos (antes del 20-oct):** ¿asistir? Si NO → cerrar task, seguir con Fase 1.
+**Estado: CERRADO — NO-GO (decisión de Carlos, 16-oct-2026: "no voy a ir").**
+Análisis previo registrado en sesión: escenario adverse = evento founders+capital, no
+feria de PYMEs; match MEDIO con "dueños que necesiten automatización"; día 21 solo por
+invitación; costo de viaje+hotel no justificó el riesgo. Seguir con Fase 1 (Task 1).
+Si aparece edición 2027 con agenda/clientes documentados, reevaluar con caso de estudio
+en mano (Task 3).
 
-**Steps:**
+**Steps (cancelados):**
 - [ ] Confirmar asistencia + cupo/registro.
 - [ ] Preparar pitch de 1 página (quién soy / qué construyo / qué ofrezco / qué busco) — 60 min.
 - [ ] Lista de 10 contactos objetivo (fundadores, dueños de PYMEs, mentores).
 - [ ] Meta: 3 conversaciones reales sobre problemas automatizables (escuchar, no vender — ventas en 3 pasos: ¿te necesito? primero).
 - [ ] De vuelta: notas en `03-Trabajo/summit_2026_notas.md`.
 
-**Hecho cuando:** notas con ≥3 leads/calificados anotados (o task cancelado con decisión registrada).
+**Hecho cuando:** notas con ≥3 leads/calificados anotados (o task cancelado con decisión registrada). ✅ cancelado con decisión registrada 16-oct-2026.
 
 ---
 
@@ -57,10 +62,10 @@
 - Lenguaje de venta: resultado del cliente, no feature list (vender el sizzle).
 
 **Steps:**
-- [ ] Escribir `oferta-agencia.md` con los 3 tiers y 3 casos de uso (retail, servicios, agencias).
-- [ ] Landing de 1 página: problema → solución → proceso (diagnóstico→build→retainer) → contacto WhatsApp.
-- [ ] Publicar landing + probar en móvil.
-- [ ] Commit + push.
+- [x] Escribir `oferta-agencia.md` con los 3 tiers y 3 casos de uso (retail, servicios, agencias).
+- [x] Landing de 1 página: problema → solución → proceso (diagnóstico→build→retainer) → contacto WhatsApp (`AgentBiz/landing/index.html`, estática sin build — placeholder `wa.me/58XXXXXXXXXX` pendiente de número real).
+- [ ] Publicar landing (GitHub Pages del fork carlos59z) + probar en móvil — pendiente de push aprobado.
+- [ ] Commit + push (push pendiente de aprobación).
 
 **Hecho cuando:** URL pública responde 200 y el mensaje pasa el test de honestidad (sin palabras tipo "garantizado/gana").
 
