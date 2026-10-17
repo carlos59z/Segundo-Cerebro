@@ -16,7 +16,7 @@ El interesado que no volvió a escribir no perdió interés: perdió tu recordat
 Del chat al Excel, del Excel al reporte. Horas de tu semana en mover
 información que ya existe en algún lugar.
 
-Hace unos meses automatice mis propios sistemas con esto — un fondo de
+Hace unos meses automaticé mis propios sistemas con esto — un fondo de
 inversión que opera solo en paper y un portal de cobros. El resultado
 honesto: no desaparecieron las decisiones humanas, desaparecieron las
 copias y pegados. Lo que antes era 2 horas diarias de tarea mecánica hoy
